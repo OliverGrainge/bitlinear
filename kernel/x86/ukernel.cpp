@@ -1,8 +1,50 @@
+// NOTE: This file is compiled directly (via setup.py/ninja) and may also be
+// included from bitlinear_cpu.cpp. We therefore include the necessary headers
+// ourselves to ensure standalone compilation works.
+
+#include <cstdint>
 #include <immintrin.h>
+
+using std::int8_t;
+using std::int32_t;
+
+// Simple scalar fallback used when AVX-VNNI is not available.
+inline int32_t i8dot_scalar(const int8_t* a, const int8_t* b, int32_t length) {
+    int32_t sum = 0;
+    for (int32_t i = 0; i < length; ++i) {
+        sum += static_cast<int32_t>(a[i]) * static_cast<int32_t>(b[i]);
+    }
+    return sum;
+}
+
+inline void i8dot_1x4_scalar(
+    const int8_t* __restrict a,
+    const int8_t* __restrict b0,
+    const int8_t* __restrict b1,
+    const int8_t* __restrict b2,
+    const int8_t* __restrict b3,
+    int32_t& c0,
+    int32_t& c1,
+    int32_t& c2,
+    int32_t& c3,
+    int32_t length
+) {
+    for (int32_t i = 0; i < length; ++i) {
+        int32_t aa = static_cast<int32_t>(a[i]);
+        c0 += aa * static_cast<int32_t>(b0[i]);
+        c1 += aa * static_cast<int32_t>(b1[i]);
+        c2 += aa * static_cast<int32_t>(b2[i]);
+        c3 += aa * static_cast<int32_t>(b3[i]);
+    }
+}
+
+#if defined(__AVXVNNIINT8__) || defined(__AVX512VNNI__)
+
+// AVX-VNNI optimized implementations
 
 // Compute a dot-product between two int8 vectors using x86 AVX-VNNI intrinsics.
 // Requires AVX-VNNI support (Intel Cascade Lake or newer, AMD Zen 4 or newer)
-int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
+inline int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
     __m256i acc0 = _mm256_setzero_si256();
     __m256i acc1 = _mm256_setzero_si256();
     __m256i acc2 = _mm256_setzero_si256();
@@ -136,3 +178,26 @@ inline void i8dot_1x4(
         c3 += aa * static_cast<int32_t>(b3[i]);
     }
 }
+
+#else  // no AVX-VNNI: fall back to scalar implementations
+
+inline int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
+    return i8dot_scalar(a, b, length);
+}
+
+inline void i8dot_1x4(
+    const int8_t* __restrict a,
+    const int8_t* __restrict b0,
+    const int8_t* __restrict b1,
+    const int8_t* __restrict b2,
+    const int8_t* __restrict b3,
+    int32_t& c0,
+    int32_t& c1,
+    int32_t& c2,
+    int32_t& c3,
+    int32_t length
+) {
+    i8dot_1x4_scalar(a, b0, b1, b2, b3, c0, c1, c2, c3, length);
+}
+
+#endif
