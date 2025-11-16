@@ -11,6 +11,7 @@
 #pragma once
 
 #include <cstdint>
+#include <iostream>
 
 // ---------------------------------------------------------------------------
 // ARM NEON IMPLEMENTATION (macOS arm64, AArch64)
@@ -27,7 +28,7 @@ static inline int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
     int32x4_t acc3 = vdupq_n_s32(0);
 
     int32_t i = 0;
-
+    std::cout << "i8dot_neon" << std::endl;
     for (; i + 63 < length; i += 64) {
         int8x16_t va0 = vld1q_s8(a + i);
         int8x16_t vb0 = vld1q_s8(b + i);
@@ -70,6 +71,7 @@ static inline void i8dot_1x4(
     int32_t& c3,
     int32_t length
 ) {
+    std::cout << "i8dot_1x4_neon" << std::endl;
     int32x4_t acc0 = vdupq_n_s32(0);
     int32x4_t acc1 = vdupq_n_s32(0);
     int32x4_t acc2 = vdupq_n_s32(0);
@@ -146,6 +148,7 @@ static inline void i8dot_1x4(
 
 // Scalar dot product helper.
 static inline int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
+    std::cout << "i8dot_avx2" << std::endl;
     __m256i acc0 = _mm256_setzero_si256();
     __m256i acc1 = _mm256_setzero_si256();
     __m256i acc2 = _mm256_setzero_si256();
@@ -202,6 +205,7 @@ static inline void i8dot_1x4(
     int32_t& c3,
     int32_t length
 ) {
+    std::cout << "i8dot_1x4_avx2" << std::endl;
     __m256i acc0 = _mm256_setzero_si256();
     __m256i acc1 = _mm256_setzero_si256();
     __m256i acc2 = _mm256_setzero_si256();
