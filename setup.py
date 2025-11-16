@@ -1,4 +1,5 @@
 from pathlib import Path
+import platform
 
 import torch
 from setuptools import setup
@@ -9,18 +10,25 @@ libomp_root = Path("/opt/homebrew/opt/libomp")
 libomp_include = libomp_root / "include"
 libomp_lib = libomp_root / "lib"
 
+# Select architecture-specific ukernel source at build time.
+arch = platform.machine().lower()
+if arch in ("arm64", "aarch64"):
+    ukernel_src = "kernel/arm/ukernel.cpp"
+else:
+    ukernel_src = "kernel/x86/ukernel.cpp"
+
 setup(
-    name='bitlinear',
+    name="bitlinear",
     ext_modules=[
         CppExtension(
-            name='bitlinear',
-            sources=['kernel/bitlinear_cache_dot.cpp'],
+            name="bitlinear",
+            sources=["kernel/bitlinear_cpu.cpp", ukernel_src],
             extra_compile_args={
-                'cxx': [
-                    '-O3',
-                    '-march=native',
-                    '-Xpreprocessor',
-                    '-fopenmp',
+                "cxx": [
+                    "-O3",
+                    "-march=native",
+                    "-Xpreprocessor",
+                    "-fopenmp",
                     f"-I{libomp_include}",
                 ],
             },
@@ -28,9 +36,9 @@ setup(
                 f"-Wl,-rpath,{torch_lib_path}",
                 f"-Wl,-rpath,{libomp_lib}",
                 f"-L{libomp_lib}",
-                '-lomp',
+                "-lomp",
             ],
         )
     ],
-    cmdclass={'build_ext': BuildExtension}
+    cmdclass={"build_ext": BuildExtension},
 )
