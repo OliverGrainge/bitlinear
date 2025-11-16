@@ -1,6 +1,4 @@
 from pathlib import Path
-import platform
-
 import torch
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CppExtension
@@ -10,19 +8,15 @@ libomp_root = Path("/opt/homebrew/opt/libomp")
 libomp_include = libomp_root / "include"
 libomp_lib = libomp_root / "lib"
 
-# Select architecture-specific ukernel source at build time.
-arch = platform.machine().lower()
-if arch in ("arm64", "aarch64"):
-    ukernel_src = "kernel/arm/ukernel.cpp"
-else:
-    ukernel_src = "kernel/x86/ukernel.cpp"
-
 setup(
     name="bitlinear",
     ext_modules=[
         CppExtension(
             name="bitlinear",
-            sources=["kernel/bitlinear_cpu.cpp", ukernel_src],
+            # ukernel implementations are now header-only (see kernel/ukernel.h),
+            # so we only need the main CPU kernel translation unit here.
+            sources=["kernel/bitlinear_cpu.cpp"],
+            include_dirs=["kernel"],
             extra_compile_args={
                 "cxx": [
                     "-O3",

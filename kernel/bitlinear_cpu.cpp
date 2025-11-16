@@ -1,55 +1,12 @@
-// Architecture-generic includes
 #include <torch/extension.h>
 #include <c10/util/Optional.h>
 #include <omp.h>
 #include <cstring>
+#include "ukernel.h"
 
 // ============================================================================
-// ARCH-SPECIFIC MICROKERNEL SELECTION
+// SHARED UTILITIES
 // ============================================================================
-
-#if defined(__aarch64__) || defined(__ARM_NEON)
-  // ARM NEON path (used on Apple Silicon, ARM servers, etc.)
-  #include <arm_neon.h>
-  #include "arm/ukernel.cpp"
-#elif defined(__x86_64__) || defined(_M_X64)
-  // x86 path (used on typical Linux/Windows desktops/servers)
-  #include <immintrin.h>
-  #include "x86/ukernel.cpp"
-#else
-  // Fallback scalar implementation if neither ARM NEON nor x86 is detected.
-  // This keeps the extension buildable on exotic architectures at the cost
-  // of performance.
-
-  inline int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
-      int32_t sum = 0;
-      for (int32_t i = 0; i < length; ++i) {
-          sum += static_cast<int32_t>(a[i]) * static_cast<int32_t>(b[i]);
-      }
-      return sum;
-  }
-
-  inline void i8dot_1x4(
-      const int8_t* __restrict a,
-      const int8_t* __restrict b0,
-      const int8_t* __restrict b1,
-      const int8_t* __restrict b2,
-      const int8_t* __restrict b3,
-      int32_t& c0,
-      int32_t& c1,
-      int32_t& c2,
-      int32_t& c3,
-      int32_t length
-  ) {
-      for (int32_t i = 0; i < length; ++i) {
-          int32_t aa = static_cast<int32_t>(a[i]);
-          c0 += aa * static_cast<int32_t>(b0[i]);
-          c1 += aa * static_cast<int32_t>(b1[i]);
-          c2 += aa * static_cast<int32_t>(b2[i]);
-          c3 += aa * static_cast<int32_t>(b3[i]);
-      }
-  }
-#endif
 // ============================================================================
 // BATCH SIZE = 1 OPTIMIZED KERNEL
 // ============================================================================
