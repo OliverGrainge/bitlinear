@@ -140,51 +140,47 @@ static inline void i8dot_1x4(
 }
 
 // ---------------------------------------------------------------------------
-// x86 AVX-VNNI IMPLEMENTATION
+// x86 AVX2 IMPLEMENTATION (no VNNI required)
 // ---------------------------------------------------------------------------
-#elif defined(__AVX2__) && defined(__AVX512VNNI__) || defined(__AVXVNNI__) || defined(__AVX512VNNI)
+#elif defined(__AVX2__)
 
 #include <immintrin.h>
 
-// Scalar dot product helper.
+// AVX2 implementation of int8 dot product using widening to 16-bit and
+// _mm256_madd_epi16. This does NOT require AVX-VNNI, so it works on CPUs
+// like Ryzen 5000 that have AVX2 but not VNNI.
 static inline int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
     std::cout << "i8dot_avx2" << std::endl;
-    __m256i acc0 = _mm256_setzero_si256();
-    __m256i acc1 = _mm256_setzero_si256();
-    __m256i acc2 = _mm256_setzero_si256();
-    __m256i acc3 = _mm256_setzero_si256();
-
+    __m256i vacc = _mm256_setzero_si256();
     int32_t i = 0;
 
-    // Process 128 bytes at a time (4x32 bytes)
-    for (; i + 127 < length; i += 128) {
-        __m256i va0 = _mm256_loadu_si256((__m256i*)(a + i));
-        __m256i vb0 = _mm256_loadu_si256((__m256i*)(b + i));
-        __m256i va1 = _mm256_loadu_si256((__m256i*)(a + i + 32));
-        __m256i vb1 = _mm256_loadu_si256((__m256i*)(b + i + 32));
-        __m256i va2 = _mm256_loadu_si256((__m256i*)(a + i + 64));
-        __m256i vb2 = _mm256_loadu_si256((__m256i*)(b + i + 64));
-        __m256i va3 = _mm256_loadu_si256((__m256i*)(a + i + 96));
-        __m256i vb3 = _mm256_loadu_si256((__m256i*)(b + i + 96));
+    // Process 32 bytes per iteration (2x16 bytes widened to 16-bit).
+    for (; i + 31 < length; i += 32) {
+        // First 16 bytes
+        __m128i va0_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i));
+        __m128i vb0_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + i));
+        __m256i va0_16 = _mm256_cvtepi8_epi16(va0_8);
+        __m256i vb0_16 = _mm256_cvtepi8_epi16(vb0_8);
+        __m256i prod0 = _mm256_madd_epi16(va0_16, vb0_16); // 16 int8 → 8 int32
+        vacc = _mm256_add_epi32(vacc, prod0);
 
-        acc0 = _mm256_dpbssd_epi32(acc0, va0, vb0);
-        acc1 = _mm256_dpbssd_epi32(acc1, va1, vb1);
-        acc2 = _mm256_dpbssd_epi32(acc2, va2, vb2);
-        acc3 = _mm256_dpbssd_epi32(acc3, va3, vb3);
+        // Next 16 bytes
+        __m128i va1_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i + 16));
+        __m128i vb1_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + i + 16));
+        __m256i va1_16 = _mm256_cvtepi8_epi16(va1_8);
+        __m256i vb1_16 = _mm256_cvtepi8_epi16(vb1_8);
+        __m256i prod1 = _mm256_madd_epi16(va1_16, vb1_16);
+        vacc = _mm256_add_epi32(vacc, prod1);
     }
 
-    // Combine accumulators
-    acc0 = _mm256_add_epi32(acc0, acc1);
-    acc2 = _mm256_add_epi32(acc2, acc3);
-    __m256i acc = _mm256_add_epi32(acc0, acc2);
-
-    // Horizontal sum of 8 int32 values
-    __m128i sum128 = _mm_add_epi32(_mm256_castsi256_si128(acc), _mm256_extracti128_si256(acc, 1));
+    // Horizontal sum of vacc (8 x int32)
+    __m128i sum128 = _mm_add_epi32(_mm256_castsi256_si128(vacc),
+                                   _mm256_extracti128_si256(vacc, 1));
     sum128 = _mm_hadd_epi32(sum128, sum128);
     sum128 = _mm_hadd_epi32(sum128, sum128);
     int32_t sum = _mm_cvtsi128_si32(sum128);
 
-    // Handle remainder
+    // Handle remaining tail elements scalar.
     for (; i < length; ++i) {
         sum += static_cast<int32_t>(a[i]) * static_cast<int32_t>(b[i]);
     }
@@ -192,7 +188,7 @@ static inline int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
     return sum;
 }
 
-// 1x4 micro-kernel for computing 4 dot-products in parallel
+// AVX2 1x4 micro-kernel: compute 4 dot-products between `a` and {b0,b1,b2,b3}.
 static inline void i8dot_1x4(
     const int8_t* __restrict a,
     const int8_t* __restrict b0,
@@ -205,75 +201,69 @@ static inline void i8dot_1x4(
     int32_t& c3,
     int32_t length
 ) {
-    std::cout << "i8dot_1x4_avx2" << std::endl;
-    __m256i acc0 = _mm256_setzero_si256();
-    __m256i acc1 = _mm256_setzero_si256();
-    __m256i acc2 = _mm256_setzero_si256();
-    __m256i acc3 = _mm256_setzero_si256();
+    __m256i vacc0 = _mm256_setzero_si256();
+    __m256i vacc1 = _mm256_setzero_si256();
+    __m256i vacc2 = _mm256_setzero_si256();
+    __m256i vacc3 = _mm256_setzero_si256();
 
     int32_t i = 0;
+    for (; i + 31 < length; i += 32) {
+        // First 16 bytes of A
+        __m128i va0_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i));
+        __m256i va0_16 = _mm256_cvtepi8_epi16(va0_8);
 
-    // Process 128 bytes at a time (4x32 bytes)
-    for (; i + 127 < length; i += 128) {
-        __m256i va0 = _mm256_loadu_si256((__m256i*)(a + i));
-        __m256i vb0 = _mm256_loadu_si256((__m256i*)(b0 + i));
-        __m256i vb1 = _mm256_loadu_si256((__m256i*)(b1 + i));
-        __m256i vb2 = _mm256_loadu_si256((__m256i*)(b2 + i));
-        __m256i vb3 = _mm256_loadu_si256((__m256i*)(b3 + i));
+        // First 16 bytes of each B
+        __m128i vb0_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b0 + i));
+        __m128i vb1_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b1 + i));
+        __m128i vb2_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b2 + i));
+        __m128i vb3_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b3 + i));
 
-        __m256i va1 = _mm256_loadu_si256((__m256i*)(a + i + 32));
-        __m256i vc0 = _mm256_loadu_si256((__m256i*)(b0 + i + 32));
-        __m256i vc1 = _mm256_loadu_si256((__m256i*)(b1 + i + 32));
-        __m256i vc2 = _mm256_loadu_si256((__m256i*)(b2 + i + 32));
-        __m256i vc3 = _mm256_loadu_si256((__m256i*)(b3 + i + 32));
+        __m256i vb0_16 = _mm256_cvtepi8_epi16(vb0_8);
+        __m256i vb1_16 = _mm256_cvtepi8_epi16(vb1_8);
+        __m256i vb2_16 = _mm256_cvtepi8_epi16(vb2_8);
+        __m256i vb3_16 = _mm256_cvtepi8_epi16(vb3_8);
 
-        __m256i va2 = _mm256_loadu_si256((__m256i*)(a + i + 64));
-        __m256i vd0 = _mm256_loadu_si256((__m256i*)(b0 + i + 64));
-        __m256i vd1 = _mm256_loadu_si256((__m256i*)(b1 + i + 64));
-        __m256i vd2 = _mm256_loadu_si256((__m256i*)(b2 + i + 64));
-        __m256i vd3 = _mm256_loadu_si256((__m256i*)(b3 + i + 64));
+        vacc0 = _mm256_add_epi32(vacc0, _mm256_madd_epi16(va0_16, vb0_16));
+        vacc1 = _mm256_add_epi32(vacc1, _mm256_madd_epi16(va0_16, vb1_16));
+        vacc2 = _mm256_add_epi32(vacc2, _mm256_madd_epi16(va0_16, vb2_16));
+        vacc3 = _mm256_add_epi32(vacc3, _mm256_madd_epi16(va0_16, vb3_16));
 
-        __m256i va3 = _mm256_loadu_si256((__m256i*)(a + i + 96));
-        __m256i ve0 = _mm256_loadu_si256((__m256i*)(b0 + i + 96));
-        __m256i ve1 = _mm256_loadu_si256((__m256i*)(b1 + i + 96));
-        __m256i ve2 = _mm256_loadu_si256((__m256i*)(b2 + i + 96));
-        __m256i ve3 = _mm256_loadu_si256((__m256i*)(b3 + i + 96));
+        // Next 16 bytes of A
+        __m128i va1_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + i + 16));
+        __m256i va1_16 = _mm256_cvtepi8_epi16(va1_8);
 
-        acc0 = _mm256_dpbssd_epi32(acc0, va0, vb0);
-        acc1 = _mm256_dpbssd_epi32(acc1, va0, vb1);
-        acc2 = _mm256_dpbssd_epi32(acc2, va0, vb2);
-        acc3 = _mm256_dpbssd_epi32(acc3, va0, vb3);
+        // Next 16 bytes of each B
+        __m128i vc0_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b0 + i + 16));
+        __m128i vc1_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b1 + i + 16));
+        __m128i vc2_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b2 + i + 16));
+        __m128i vc3_8 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b3 + i + 16));
 
-        acc0 = _mm256_dpbssd_epi32(acc0, va1, vc0);
-        acc1 = _mm256_dpbssd_epi32(acc1, va1, vc1);
-        acc2 = _mm256_dpbssd_epi32(acc2, va1, vc2);
-        acc3 = _mm256_dpbssd_epi32(acc3, va1, vc3);
+        __m256i vc0_16 = _mm256_cvtepi8_epi16(vc0_8);
+        __m256i vc1_16 = _mm256_cvtepi8_epi16(vc1_8);
+        __m256i vc2_16 = _mm256_cvtepi8_epi16(vc2_8);
+        __m256i vc3_16 = _mm256_cvtepi8_epi16(vc3_8);
 
-        acc0 = _mm256_dpbssd_epi32(acc0, va2, vd0);
-        acc1 = _mm256_dpbssd_epi32(acc1, va2, vd1);
-        acc2 = _mm256_dpbssd_epi32(acc2, va2, vd2);
-        acc3 = _mm256_dpbssd_epi32(acc3, va2, vd3);
-
-        acc0 = _mm256_dpbssd_epi32(acc0, va3, ve0);
-        acc1 = _mm256_dpbssd_epi32(acc1, va3, ve1);
-        acc2 = _mm256_dpbssd_epi32(acc2, va3, ve2);
-        acc3 = _mm256_dpbssd_epi32(acc3, va3, ve3);
+        vacc0 = _mm256_add_epi32(vacc0, _mm256_madd_epi16(va1_16, vc0_16));
+        vacc1 = _mm256_add_epi32(vacc1, _mm256_madd_epi16(va1_16, vc1_16));
+        vacc2 = _mm256_add_epi32(vacc2, _mm256_madd_epi16(va1_16, vc2_16));
+        vacc3 = _mm256_add_epi32(vacc3, _mm256_madd_epi16(va1_16, vc3_16));
     }
 
-    // Horizontal sum for each accumulator
+    // Horizontal sum helpers
     auto hsum = [](__m256i v) -> int32_t {
-        __m128i sum128 = _mm_add_epi32(_mm256_castsi256_si128(v), _mm256_extracti128_si256(v, 1));
+        __m128i sum128 = _mm_add_epi32(_mm256_castsi256_si128(v),
+                                       _mm256_extracti128_si256(v, 1));
         sum128 = _mm_hadd_epi32(sum128, sum128);
         sum128 = _mm_hadd_epi32(sum128, sum128);
         return _mm_cvtsi128_si32(sum128);
     };
 
-    c0 += hsum(acc0);
-    c1 += hsum(acc1);
-    c2 += hsum(acc2);
-    c3 += hsum(acc3);
+    c0 += hsum(vacc0);
+    c1 += hsum(vacc1);
+    c2 += hsum(vacc2);
+    c3 += hsum(vacc3);
 
-    // Handle remainder
+    // Handle remaining tail elements scalar.
     for (; i < length; ++i) {
         int32_t aa = static_cast<int32_t>(a[i]);
         c0 += aa * static_cast<int32_t>(b0[i]);
