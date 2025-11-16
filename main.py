@@ -169,6 +169,16 @@ class BitLinear(nn.Module):
         
         # Use fallback if bitlinear is not available
         if HAS_BITLINEAR:
+            # The C++ extension is CPU-only. Guard explicitly against CUDA
+            # tensors so we fail loudly instead of segfaulting when trying to
+            # dereference device pointers from C++.
+            if self.weight.is_cuda:
+                raise RuntimeError(
+                    "BitLinear C++ kernel currently supports only CPU tensors. "
+                    "Move the module to CPU (e.g. layer.to('cpu')) before calling "
+                    "deploy(), or run inference with device='cpu'."
+                )
+
             w_scale, w_packed = bnn.prepare_weights(
                 self.weight,
                 self.eps,
@@ -206,6 +216,16 @@ class BitLinear(nn.Module):
 
         # Use fallback if bitlinear is not available
         if HAS_BITLINEAR:
+            # Guard against accidentally passing CUDA tensors into the CPU-only
+            # kernel. This used to cause hard segfaults on x86 when CUDA was
+            # available; now we raise a clear error instead.
+            if x.is_cuda:
+                raise RuntimeError(
+                    "BitLinear deployed C++ kernel is CPU-only. "
+                    "Call layer.to('cpu') and move inputs to CPU before "
+                    "running inference, or use the Python fallback path."
+                )
+
             if x.ndim == 3:
                 B, T, K = x.shape
                 assert K == self.in_features  # sanity check (optional)

@@ -4,6 +4,40 @@
 #include <cstring>
 #include "ukernel.h"
 
+#ifdef BITLINEAR_PROFILE
+#include <chrono>
+#include <iostream>
+
+// Simple profiling helpers enabled only when BITLINEAR_PROFILE is defined.
+using bitlinear_clock = std::chrono::high_resolution_clock;
+
+struct ProfileTimer {
+    bitlinear_clock::time_point t0;
+    ProfileTimer() : t0(bitlinear_clock::now()) {}
+
+    double lap_ms() {
+        auto t1 = bitlinear_clock::now();
+        std::chrono::duration<double, std::milli> diff = t1 - t0;
+        t0 = t1;
+        return diff.count();
+    }
+};
+
+#define BL_PROFILE_SCOPE() ProfileTimer __bl_timer;
+#define BL_PROFILE_LAP(label)                                                     \
+    do {                                                                          \
+        double __ms = __bl_timer.lap_ms();                                        \
+        std::cout << "[bitlinear_profile] " << (label) << ": "                    \
+                  << __ms << " ms" << std::endl;                                  \
+    } while (0)
+
+#else
+
+#define BL_PROFILE_SCOPE()
+#define BL_PROFILE_LAP(label) do { (void)sizeof(label); } while (0)
+
+#endif
+
 // ============================================================================
 // SHARED UTILITIES
 // ============================================================================
@@ -23,11 +57,28 @@ torch::Tensor bitlinear_bs1(
     c10::optional<torch::Tensor> bias_opt,
     float eps
 ) {
+#ifdef BITLINEAR_PROFILE
+    double __quant_ms  = 0.0;
+    double __unpack_ms = 0.0;
+    double __matmul_ms = 0.0;
+    double __write_ms  = 0.0;
+#endif
+
     // Activation quantization
+#ifdef BITLINEAR_PROFILE
+    auto __t0 = bitlinear_clock::now();
+#endif
     auto x_fp32 = x.to(torch::kFloat32);
     auto x_scale = std::get<0>(x_fp32.abs().max(-1, true)).clamp_min(eps) / 127.0;
     auto x_quant = (x_fp32 / x_scale).round().clamp(-128, 127).to(torch::kInt8);
     x_scale = x_scale.squeeze(-1).contiguous();
+#ifdef BITLINEAR_PROFILE
+    {
+        auto __t1 = bitlinear_clock::now();
+        std::chrono::duration<double, std::milli> __diff = __t1 - __t0;
+        __quant_ms += __diff.count();
+    }
+#endif
     
     // Get data pointers
     auto x_quant_ptr  = x_quant.data_ptr<int8_t>();
@@ -35,9 +86,14 @@ torch::Tensor bitlinear_bs1(
     auto x_scale_ptr  = x_scale.data_ptr<float>();
     auto w_packed_ptr = w_packed.data_ptr<uint8_t>();
     
+    // Keep the bias tensor alive for the entire kernel (including inside the
+    // OpenMP region). We must NOT take a raw pointer to a temporary tensor
+    // that goes out of scope, otherwise bias_ptr becomes dangling and can
+    // cause use-after-free / segfaults under heavier workloads.
+    torch::Tensor bias;
     float* bias_ptr = nullptr;
     if (bias_opt.has_value()) {
-        auto bias = bias_opt->to(torch::kFloat32);
+        bias = bias_opt->to(torch::kFloat32).contiguous();
         bias_ptr  = bias.data_ptr<float>();
     }
 
@@ -60,6 +116,12 @@ torch::Tensor bitlinear_bs1(
         alignas(64) int8_t w_buffer[TILE_N_BS1 * TILE_K_BS1];
         alignas(64) int32_t acc_buffer[TILE_N_BS1];
 
+#ifdef BITLINEAR_PROFILE
+        double __unpack_ms_local = 0.0;
+        double __matmul_ms_local = 0.0;
+        double __write_ms_local  = 0.0;
+#endif
+
         #pragma omp for schedule(dynamic)
         for (int64_t n_tile = 0; n_tile < N; n_tile += TILE_N_BS1) {
             const int64_t n_end = std::min(n_tile + TILE_N_BS1, N);
@@ -74,6 +136,9 @@ torch::Tensor bitlinear_bs1(
                 const int64_t k_size = k_end - k_tile;
 
                 // Unpack weights into cache
+#ifdef BITLINEAR_PROFILE
+                auto __tu0 = bitlinear_clock::now();
+#endif
                 for (int64_t n = 0; n < n_size; ++n) {
                     const int64_t global_n = n_tile + n;
 
@@ -87,8 +152,18 @@ torch::Tensor bitlinear_bs1(
                         w_buffer[n * k_size + k + 3] = static_cast<int8_t>(w_byte & 0x03) - 1;
                     }
                 }
+#ifdef BITLINEAR_PROFILE
+                {
+                    auto __tu1 = bitlinear_clock::now();
+                    std::chrono::duration<double, std::milli> __diff = __tu1 - __tu0;
+                    __unpack_ms_local += __diff.count();
+                }
+#endif
 
                 // Compute dot products - use 1x4 kernel
+#ifdef BITLINEAR_PROFILE
+                auto __tm0 = bitlinear_clock::now();
+#endif
                 const int8_t* x_row = x_quant_ptr + k_tile;
 
                 int64_t n = 0;
@@ -116,9 +191,19 @@ torch::Tensor bitlinear_bs1(
                         static_cast<int32_t>(k_size)
                     );
                 }
+#ifdef BITLINEAR_PROFILE
+                {
+                    auto __tm1 = bitlinear_clock::now();
+                    std::chrono::duration<double, std::milli> __diff = __tm1 - __tm0;
+                    __matmul_ms_local += __diff.count();
+                }
+#endif
             }
 
             // Scale and write results
+#ifdef BITLINEAR_PROFILE
+            auto __tw0 = bitlinear_clock::now();
+#endif
             for (int64_t n = 0; n < n_size; ++n) {
                 const int64_t global_n = n_tile + n;
                 float result = static_cast<float>(acc_buffer[n]) * combined_scale;
@@ -129,8 +214,43 @@ torch::Tensor bitlinear_bs1(
 
                 y_ptr[global_n] = result;
             }
+
+#ifdef BITLINEAR_PROFILE
+            {
+                auto __tw1 = bitlinear_clock::now();
+                std::chrono::duration<double, std::milli> __diff = __tw1 - __tw0;
+                __write_ms_local += __diff.count();
+            }
+#endif
         }
+
+#ifdef BITLINEAR_PROFILE
+        // Aggregate per-thread timings into the shared accumulators.
+        #pragma omp critical
+        {
+            __unpack_ms += __unpack_ms_local;
+            __matmul_ms += __matmul_ms_local;
+            __write_ms  += __write_ms_local;
+        }
+#endif
     }
+
+#ifdef BITLINEAR_PROFILE
+    // For profiling, we report the sum of component times (which correspond to
+    // total CPU time across all threads) rather than wall-clock time. This
+    // keeps percentages intuitive (they add up to ~100%).
+    double __total_ms = __quant_ms + __unpack_ms + __matmul_ms + __write_ms;
+    auto __pct = [] (double part, double total) -> double {
+        return (total > 0.0) ? (100.0 * part / total) : 0.0;
+    };
+
+    std::cout << "[bitlinear_profile] bs1 summary (M=1, N=" << N << ", K=" << K << ")\n";
+    std::cout << "  total:  " << __total_ms << " ms\n";
+    std::cout << "  quant:  " << __quant_ms  << " ms (" << __pct(__quant_ms,  __total_ms) << "%)\n";
+    std::cout << "  unpack: " << __unpack_ms << " ms (" << __pct(__unpack_ms, __total_ms) << "%)\n";
+    std::cout << "  matmul: " << __matmul_ms << " ms (" << __pct(__matmul_ms, __total_ms) << "%)\n";
+    std::cout << "  write:  " << __write_ms  << " ms (" << __pct(__write_ms,  __total_ms) << "%)\n";
+#endif
 
     return y.to(x.dtype());
 }
@@ -150,11 +270,29 @@ torch::Tensor bitlinear_batched(
     c10::optional<torch::Tensor> bias_opt,
     float eps
 ) {
+#ifdef BITLINEAR_PROFILE
+    double __quant_ms   = 0.0;
+    double __load_ms    = 0.0;
+    double __unpack_ms  = 0.0;
+    double __matmul_ms  = 0.0;
+    double __write_ms   = 0.0;
+#endif
+
     // Activation quantization
+#ifdef BITLINEAR_PROFILE
+    auto __t0 = bitlinear_clock::now();
+#endif
     auto x_fp32 = x.to(torch::kFloat32);
     auto x_scale = std::get<0>(x_fp32.abs().max(-1, true)).clamp_min(eps) / 127.0;
     auto x_quant = (x_fp32 / x_scale).round().clamp(-128, 127).to(torch::kInt8);
     x_scale = x_scale.squeeze(-1).contiguous();
+#ifdef BITLINEAR_PROFILE
+    {
+        auto __t1 = bitlinear_clock::now();
+        std::chrono::duration<double, std::milli> __diff = __t1 - __t0;
+        __quant_ms += __diff.count();
+    }
+#endif
     
     // Get data pointers
     auto x_quant_ptr  = x_quant.data_ptr<int8_t>();
@@ -162,9 +300,12 @@ torch::Tensor bitlinear_batched(
     auto x_scale_ptr  = x_scale.data_ptr<float>();
     auto w_packed_ptr = w_packed.data_ptr<uint8_t>();
     
+    // Same lifetime rule as in bitlinear_bs1: the bias tensor must stay alive
+    // for the duration of the OpenMP region.
+    torch::Tensor bias;
     float* bias_ptr = nullptr;
     if (bias_opt.has_value()) {
-        auto bias = bias_opt->to(torch::kFloat32);
+        bias = bias_opt->to(torch::kFloat32).contiguous();
         bias_ptr  = bias.data_ptr<float>();
     }
 
@@ -187,6 +328,13 @@ torch::Tensor bitlinear_batched(
         alignas(64) int8_t  w_buffer[TILE_N * TILE_K];
         alignas(64) int32_t acc_buffer[TILE_M * TILE_N];
 
+#ifdef BITLINEAR_PROFILE
+        double __load_ms_local   = 0.0;
+        double __unpack_ms_local = 0.0;
+        double __matmul_ms_local = 0.0;
+        double __write_ms_local  = 0.0;
+#endif
+
         #pragma omp for collapse(2) schedule(dynamic)
         for (int64_t m_tile = 0; m_tile < M; m_tile += TILE_M) {
             for (int64_t n_tile = 0; n_tile < N; n_tile += TILE_N) {
@@ -203,6 +351,9 @@ torch::Tensor bitlinear_batched(
                     const int64_t k_size = k_end - k_tile;
 
                     // Load activations
+#ifdef BITLINEAR_PROFILE
+                    auto __t_load0 = bitlinear_clock::now();
+#endif
                     for (int64_t m = 0; m < m_size; ++m) {
                         const int64_t global_m = m_tile + m;
                         std::memcpy(
@@ -212,7 +363,18 @@ torch::Tensor bitlinear_batched(
                         );
                     }
 
+#ifdef BITLINEAR_PROFILE
+                    {
+                        auto __t_load1 = bitlinear_clock::now();
+                        std::chrono::duration<double, std::milli> __diff = __t_load1 - __t_load0;
+                        __load_ms_local += __diff.count();
+                    }
+#endif
+
                     // Unpack weights
+#ifdef BITLINEAR_PROFILE
+                    auto __t_unpack0 = bitlinear_clock::now();
+#endif
                     for (int64_t n = 0; n < n_size; ++n) {
                         const int64_t global_n = n_tile + n;
 
@@ -227,7 +389,18 @@ torch::Tensor bitlinear_batched(
                         }
                     }
 
+#ifdef BITLINEAR_PROFILE
+                    {
+                        auto __t_unpack1 = bitlinear_clock::now();
+                        std::chrono::duration<double, std::milli> __diff = __t_unpack1 - __t_unpack0;
+                        __unpack_ms_local += __diff.count();
+                    }
+#endif
+
                     // Compute tile
+#ifdef BITLINEAR_PROFILE
+                    auto __t_matmul0 = bitlinear_clock::now();
+#endif
                     for (int64_t m = 0; m < m_size; ++m) {
                         const int8_t* x_row = x_buffer + m * k_size;
 
@@ -259,9 +432,19 @@ torch::Tensor bitlinear_batched(
                             );
                         }
                     }
+#ifdef BITLINEAR_PROFILE
+                    {
+                        auto __t_matmul1 = bitlinear_clock::now();
+                        std::chrono::duration<double, std::milli> __diff = __t_matmul1 - __t_matmul0;
+                        __matmul_ms_local += __diff.count();
+                    }
+#endif
                 }
 
                 // Scale and write results
+#ifdef BITLINEAR_PROFILE
+                auto __t_write0 = bitlinear_clock::now();
+#endif
                 for (int64_t m = 0; m < m_size; ++m) {
                     const int64_t global_m = m_tile + m;
                     const float   a_scale  = x_scale_ptr[global_m];
@@ -279,9 +462,45 @@ torch::Tensor bitlinear_batched(
                         y_ptr[global_m * N + global_n] = result;
                     }
                 }
+#ifdef BITLINEAR_PROFILE
+                {
+                    auto __t_write1 = bitlinear_clock::now();
+                    std::chrono::duration<double, std::milli> __diff = __t_write1 - __t_write0;
+                    __write_ms_local += __diff.count();
+                }
+#endif
             }
         }
+
+#ifdef BITLINEAR_PROFILE
+        // Aggregate per-thread timings into the shared accumulators.
+        #pragma omp critical
+        {
+            __load_ms   += __load_ms_local;
+            __unpack_ms += __unpack_ms_local;
+            __matmul_ms += __matmul_ms_local;
+            __write_ms  += __write_ms_local;
+        }
+#endif
     }
+
+#ifdef BITLINEAR_PROFILE
+    // For profiling, we report the sum of component times (total CPU time
+    // across all threads) rather than wall-clock time. This way the section
+    // percentages are meaningful and sum to ~100%.
+    double __total_ms = __quant_ms + __load_ms + __unpack_ms + __matmul_ms + __write_ms;
+    auto __pct = [] (double part, double total) -> double {
+        return (total > 0.0) ? (100.0 * part / total) : 0.0;
+    };
+
+    std::cout << "[bitlinear_profile] batched summary (M=" << M << ", N=" << N << ", K=" << K << ")\n";
+    std::cout << "  total:  " << __total_ms << " ms\n";
+    std::cout << "  quant:  " << __quant_ms  << " ms (" << __pct(__quant_ms,  __total_ms) << "%)\n";
+    std::cout << "  load:   " << __load_ms   << " ms (" << __pct(__load_ms,   __total_ms) << "%)\n";
+    std::cout << "  unpack: " << __unpack_ms << " ms (" << __pct(__unpack_ms, __total_ms) << "%)\n";
+    std::cout << "  matmul: " << __matmul_ms << " ms (" << __pct(__matmul_ms, __total_ms) << "%)\n";
+    std::cout << "  write:  " << __write_ms  << " ms (" << __pct(__write_ms,  __total_ms) << "%)\n";
+#endif
 
     return y.to(x.dtype());
 }
@@ -327,15 +546,20 @@ std::tuple<torch::Tensor, torch::Tensor> prepare_weights(
     auto w_packed = torch::zeros({N, K / 4}, torch::kUInt8);
     auto w_packed_ptr = w_packed.data_ptr<uint8_t>();
 
-    #pragma omp parallel for
+    // NOTE: Use a simple serial loop here instead of OpenMP. This packing
+    // routine is relatively cheap compared to the matmul kernels, and using
+    // OpenMP inside this function has caused crashes on some platforms when
+    // combined with PyTorch's own threading. Keeping it serial is safer and
+    // still fast enough.
     for (int64_t n = 0; n < N; n++) {
         for (int64_t k = 0; k < K; k += 4) {
-            uint8_t w0 = static_cast<uint8_t>(w_quant_ptr[n * K + k]);
+            uint8_t w0 = static_cast<uint8_t>(w_quant_ptr[n * K + k + 0]);
             uint8_t w1 = static_cast<uint8_t>(w_quant_ptr[n * K + k + 1]);
             uint8_t w2 = static_cast<uint8_t>(w_quant_ptr[n * K + k + 2]);
             uint8_t w3 = static_cast<uint8_t>(w_quant_ptr[n * K + k + 3]);
 
-            w_packed_ptr[n * (K / 4) + (k / 4)] = (w0 << 6) | (w1 << 4) | (w2 << 2) | w3;
+            w_packed_ptr[n * (K / 4) + (k / 4)] =
+                static_cast<uint8_t>((w0 << 6) | (w1 << 4) | (w2 << 2) | w3);
         }
     }
     

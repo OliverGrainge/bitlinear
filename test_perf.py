@@ -56,14 +56,23 @@ def parse_args() -> argparse.Namespace:
 
 
 def resolve_device(device_arg: str | None) -> torch.device:
+    """
+    Resolve the device to run on.
+
+    NOTE: The optimized C++ BitLinear kernel in this repo is CPU-only. While
+    training mode can run on CUDA via the pure-Python implementation, the
+    deployed inference path will error out if you try to use CUDA tensors.
+    To keep the perf script robust across machines with/without GPUs, we
+    default to CPU here.
+    """
     if device_arg == "cuda":
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA requested but torch.cuda.is_available() is False")
         return torch.device("cuda")
-    if device_arg == "cpu":
+    if device_arg == "cpu" or device_arg is None:
         return torch.device("cpu")
-    # auto
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Fallback: be conservative and use CPU
+    return torch.device("cpu")
 
 
 def main() -> None:
