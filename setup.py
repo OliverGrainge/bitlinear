@@ -1,19 +1,45 @@
 from pathlib import Path
 import os
 import platform
+import sys
 
-import torch
 from setuptools import setup
-from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
 
-torch_lib_path = Path(torch.__file__).parent / "lib"
+# Try to import torch - if not available, we'll handle it gracefully
+# This allows setup.py to be parsed even if torch isn't installed yet
+try:
+    import torch
+    from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+    # We'll import these later when they're actually needed
+    # For now, we'll define the extension structure
+    BuildExtension = None
+    CppExtension = None
+    CUDAExtension = None
+
+# Read README for long description
+this_directory = Path(__file__).parent
+long_description = (this_directory / "README.md").read_text(encoding="utf-8") if (this_directory / "README.md").exists() else ""
+
+# Get torch lib path if available
+if TORCH_AVAILABLE:
+    torch_lib_path = Path(torch.__file__).parent / "lib"
+else:
+    torch_lib_path = None
 
 # Allow forcing a CPU-only build regardless of CUDA availability so local
 # rebuilds can skip NVCC when iterating on CPU kernels.
 force_cpu_build = bool(int(os.environ.get("BITLINEAR_FORCE_CPU", "0")))
 
 # Check if CUDA is available (and not explicitly disabled)
-cuda_available = (not force_cpu_build) and torch.cuda.is_available()
+if TORCH_AVAILABLE:
+    cuda_available = (not force_cpu_build) and torch.cuda.is_available()
+else:
+    # If torch isn't available yet, default to CPU-only build
+    # The actual CUDA check will happen when setup runs after torch is installed
+    cuda_available = False
 
 # OpenMP paths - macOS uses homebrew, Linux typically uses system libraries
 if platform.system() == "Darwin":
@@ -64,7 +90,9 @@ else:
         extra_cxx_flags.append(f"-I{libomp_include}")
 
 # Link arguments
-extra_link_args = [f"-Wl,-rpath,{torch_lib_path}"]
+extra_link_args = []
+if torch_lib_path:
+    extra_link_args.append(f"-Wl,-rpath,{torch_lib_path}")
 
 if platform.system() == "Darwin":
     extra_link_args.extend(
@@ -81,7 +109,34 @@ else:
 # Define macros
 define_macros = []
 
-# Create extension based on CUDA availability
+# Always create the extension - it will be built during installation
+# The extension is created here but built by BuildExtension during setup
+# If torch isn't available yet, we need to import it now or defer extension creation
+if not TORCH_AVAILABLE:
+    # Try to import torch again - it might be available now via setup_requires
+    try:
+        import torch
+        from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
+        TORCH_AVAILABLE = True
+        if torch_lib_path is None:
+            torch_lib_path = Path(torch.__file__).parent / "lib"
+            if torch_lib_path:
+                extra_link_args.insert(0, f"-Wl,-rpath,{torch_lib_path}")
+        # Re-check CUDA availability
+        cuda_available = (not force_cpu_build) and torch.cuda.is_available()
+    except ImportError:
+        # If torch still isn't available, we can't proceed
+        # This should not happen if build-system.requires in pyproject.toml is working
+        # The C++ files include <torch/extension.h> so torch headers are required
+        raise RuntimeError(
+            "PyTorch is required to build this package because the C++ source files "
+            "include <torch/extension.h>. PyTorch should be installed automatically "
+            "via build-system.requires in pyproject.toml. If you see this error, "
+            "please ensure you're using a PEP 517-compatible installer (pip >= 19.0) "
+            "or install PyTorch manually: pip install torch>=1.13.0"
+        )
+
+# Now create the extension with torch available
 if cuda_available:
     # CUDA is available - build with CUDA support
     define_macros.append(("WITH_CUDA", None))
@@ -175,10 +230,34 @@ setup(
     name="bitlinear",
     version="0.1.0",
     description="Efficient BitLinear implementation with CPU and CUDA support",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    author="Oliver",
+    author_email="oliver@example.com",
+    url="https://github.com/oliver/bitlinear",
+    license="MIT",
+    py_modules=["bitlinear"],  # Include bitlinear.py as a module
     ext_modules=[extension],
-    cmdclass={"build_ext": BuildExtension},
+    cmdclass={"build_ext": BuildExtension} if BuildExtension else {},
     python_requires=">=3.7",
-    install_requires=[
-        "torch>=1.13.0",
+    # Note: install_requires is specified in pyproject.toml [project] dependencies
+    # to avoid conflicts. Build dependencies are in [build-system] requires.
+    # Torch is required there for compilation since C++ files include <torch/extension.h>
+    classifiers=[
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: Developers",
+        "Intended Audience :: Science/Research",
+        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: C++",
+        "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
+    zip_safe=False,  # Important for extensions
+    keywords="pytorch neural-networks quantization binary-networks cuda bitlinear",
+    include_package_data=True,  # Include files specified in MANIFEST.in
 )

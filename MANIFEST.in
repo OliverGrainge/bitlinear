@@ -1,0 +1,13 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include setup.py
+include bitlinear.py
+recursive-include csrc *.cpp *.cu *.h
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * *.so
+recursive-exclude * build
+recursive-exclude * dist
+recursive-exclude * *.egg-info
+
