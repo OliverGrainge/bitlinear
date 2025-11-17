@@ -13,6 +13,22 @@ BitLinear is a binary neural network linear layer implementation that quantizes 
 - **Flexible quantization**: Configurable quantization types for different use cases
 - **PyTorch integration**: Seamless integration with PyTorch's `nn.Module` API
 
+## Quick Start
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/OliverGrainge/bitlinear.git
+cd bitlinear
+
+# 2. Install and build kernels (editable mode recommended)
+pip install -e .
+
+# 3. Verify the kernels were built
+python -c "import _bitlinear; print('✓ Kernels built successfully!')"
+```
+
+**Note:** The kernels are compiled automatically during installation. If the verification step fails, see [Troubleshooting Build Issues](#troubleshooting-build-issues) below.
+
 ## Installation
 
 ### Prerequisites
@@ -27,43 +43,150 @@ Before installing, ensure you have:
   - Windows: Visual Studio Build Tools or MSVC
 - **CUDA toolkit** (optional, for GPU support)
 - **OpenMP** (for CPU parallelization, usually included with compiler)
+  - macOS: `brew install libomp` (if not using system OpenMP)
 
-### Install from GitHub
+### Building the Kernels
 
-**Option 1: Clone and install**
+**⚠️ IMPORTANT:** This package requires compiling C++/CUDA kernels. The kernels are **NOT** pre-built and must be compiled during installation.
+
+#### Quick Start (Recommended)
+
+**For development (editable install - automatically builds kernels):**
 ```bash
-git clone https://github.com/oliver/bitlinear.git
+git clone https://github.com/OliverGrainge/bitlinear.git
+cd bitlinear
+pip install -e .
+```
+
+**For regular installation:**
+```bash
+git clone https://github.com/OliverGrainge/bitlinear.git
 cd bitlinear
 pip install .
 ```
 
-**Option 2: Install directly from GitHub** (no clone needed)
-```bash
-pip install git+https://github.com/oliver/bitlinear.git
+When you run `pip install .` or `pip install -e .`, the build process should automatically:
+1. Detect if CUDA is available (via PyTorch)
+2. Compile CPU kernels (always)
+3. Compile CUDA kernels (if CUDA is available)
+4. Build the `_bitlinear` extension module
+
+You should see build output like:
+```
+Building BitLinear with CUDA support
+============================================================
+CUDA version: 12.0
+Sources: 2 CPU + 1 CUDA files
+============================================================
 ```
 
-For a specific version/tag:
-```bash
-pip install git+https://github.com/oliver/bitlinear.git@v0.1.0
+Or for CPU-only:
+```
+Building BitLinear with CPU-only support
+============================================================
+CUDA not available - skipping GPU kernels
+Sources: 2 CPU files
+============================================================
 ```
 
-The C++/CUDA extension will be compiled during installation. This may take a few minutes.
+#### Verify the Kernels Were Built
 
-### CPU-only Build
+**After installation, ALWAYS verify the extension was built:**
+
+```bash
+python -c "import _bitlinear; print('✓ Kernels built successfully!')"
+```
+
+If this command fails with `ModuleNotFoundError: No module named '_bitlinear'`, the kernels were **not** built. See troubleshooting below.
+
+#### Manual Kernel Compilation
+
+If `pip install .` didn't build the kernels (or you want to rebuild them), use one of these methods:
+
+**Method 1: Build extension in-place (recommended for development)**
+```bash
+python setup.py build_ext --inplace
+```
+
+**Method 2: Install in editable mode (automatically compiles)**
+```bash
+pip install -e .
+```
+
+**Method 3: Clean rebuild**
+```bash
+# Clean previous builds
+rm -rf build dist *.egg-info
+
+# Rebuild
+pip install -e .
+```
+
+#### CPU-only Build
 
 To skip CUDA compilation (faster build, CPU-only):
 
 ```bash
-BITLINEAR_FORCE_CPU=1 pip install .
+# Set environment variable before building
+export BITLINEAR_FORCE_CPU=1
+pip install -e .
 ```
 
-### Verify Installation
+Or in one command:
+```bash
+BITLINEAR_FORCE_CPU=1 pip install -e .
+```
 
-After installation, verify the extension was built successfully:
+#### Install from GitHub (Direct)
+
+You can also install directly from GitHub:
 
 ```bash
-python -c "import _bitlinear; print('Installation successful!')"
+pip install git+https://github.com/OliverGrainge/bitlinear.git
 ```
+
+**Note:** This should also build the kernels automatically, but if it doesn't, you'll need to clone the repo and build manually (see above).
+
+### Troubleshooting Build Issues
+
+If the kernels didn't build or you see import errors:
+
+1. **Check PyTorch is installed:**
+   ```bash
+   python -c "import torch; print(f'PyTorch {torch.__version__}')"
+   ```
+
+2. **Verify C++ compiler:**
+   ```bash
+   # Linux/macOS
+   gcc --version
+   # or
+   clang --version
+   ```
+
+3. **Check build output:** Look for compilation errors in the `pip install` output. Common issues:
+   - Missing compiler
+   - Missing OpenMP (macOS: `brew install libomp`)
+   - CUDA version mismatch
+   - PyTorch version incompatibility
+
+4. **Force a clean rebuild:**
+   ```bash
+   rm -rf build dist *.egg-info
+   pip install -e . --no-cache-dir
+   ```
+
+5. **Check if extension exists:**
+   ```bash
+   # Find where it was installed
+   python -c "import sys; print(sys.path)"
+   # Look for _bitlinear*.so (Linux/macOS) or _bitlinear*.pyd (Windows)
+   ```
+
+6. **Build with verbose output:**
+   ```bash
+   pip install -e . -v
+   ```
 
 ## Usage
 
@@ -127,31 +250,6 @@ pip install -e .
 pytest test.py
 python test_perf.py
 ```
-
-### Troubleshooting Installation
-
-If installation fails, check:
-
-1. **PyTorch is installed**: The C++ source files require PyTorch headers (`<torch/extension.h>`)
-   ```bash
-   python -c "import torch; print(torch.__version__)"
-   ```
-
-2. **C++ compiler is available**:
-   - Linux: `gcc --version` or `clang --version`
-   - macOS: `clang --version`
-   - Windows: Check Visual Studio installation
-
-3. **CUDA (if using GPU)**: Ensure CUDA toolkit matches your PyTorch CUDA version
-   ```bash
-   python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
-   ```
-
-4. **Build errors**: Check the full error output. Common issues:
-   - Missing compiler
-   - Missing OpenMP library
-   - CUDA version mismatch
-   - PyTorch version incompatibility
 
 ## License
 
