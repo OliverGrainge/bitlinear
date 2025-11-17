@@ -26,6 +26,11 @@ long_description = (this_directory / "README.md").read_text(encoding="utf-8") if
 # Get torch lib path if available
 if TORCH_AVAILABLE:
     torch_lib_path = Path(torch.__file__).parent / "lib"
+    # Resolve to absolute path and ensure it exists
+    if torch_lib_path.exists():
+        torch_lib_path = torch_lib_path.resolve()
+    else:
+        torch_lib_path = None
 else:
     torch_lib_path = None
 
@@ -91,8 +96,19 @@ else:
 
 # Link arguments
 extra_link_args = []
-if torch_lib_path:
-    extra_link_args.append(f"-Wl,-rpath,{torch_lib_path}")
+library_dirs = []
+if torch_lib_path and torch_lib_path.exists():
+    # Add library directory for linking
+    library_dirs.append(str(torch_lib_path))
+    # On macOS, rpath should work, but we also ensure library_dirs is set
+    if platform.system() == "Darwin":
+        # Use absolute path in rpath for macOS
+        extra_link_args.append(f"-Wl,-rpath,{torch_lib_path}")
+        # Also add @rpath fallback
+        extra_link_args.append("-Wl,-rpath,@loader_path")
+    else:
+        # Linux
+        extra_link_args.append(f"-Wl,-rpath,{torch_lib_path}")
 
 if platform.system() == "Darwin":
     extra_link_args.extend(
@@ -120,8 +136,16 @@ if not TORCH_AVAILABLE:
         TORCH_AVAILABLE = True
         if torch_lib_path is None:
             torch_lib_path = Path(torch.__file__).parent / "lib"
-            if torch_lib_path:
-                extra_link_args.insert(0, f"-Wl,-rpath,{torch_lib_path}")
+            if torch_lib_path.exists():
+                torch_lib_path = torch_lib_path.resolve()
+                if platform.system() == "Darwin":
+                    extra_link_args.insert(0, f"-Wl,-rpath,{torch_lib_path}")
+                    library_dirs.insert(0, str(torch_lib_path))
+                else:
+                    extra_link_args.insert(0, f"-Wl,-rpath,{torch_lib_path}")
+                    library_dirs.insert(0, str(torch_lib_path))
+            else:
+                torch_lib_path = None
         # Re-check CUDA availability
         cuda_available = (not force_cpu_build) and torch.cuda.is_available()
     except ImportError:
@@ -194,6 +218,7 @@ if cuda_available:
         name="_bitlinear",
         sources=cpu_sources + cuda_sources,
         include_dirs=["csrc", "csrc/cpu", "csrc/cuda"],
+        library_dirs=library_dirs,
         extra_compile_args={
             "cxx": extra_cxx_flags,
             "nvcc": extra_nvcc_flags,
@@ -214,6 +239,7 @@ else:
         name="_bitlinear",
         sources=cpu_sources,
         include_dirs=["csrc", "csrc/cpu"],
+        library_dirs=library_dirs,
         extra_compile_args={"cxx": extra_cxx_flags},
         extra_link_args=extra_link_args,
         define_macros=define_macros,
