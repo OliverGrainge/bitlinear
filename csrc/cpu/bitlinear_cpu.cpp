@@ -4,18 +4,67 @@
 #include <cstring>
 #include "ukernel.h"
 
+// ============================================================================
+// CONFIGURATION AND CONSTANTS
+// ============================================================================
+
+// Batch size = 1 optimized tiles
+constexpr int64_t TILE_N_BS1 = 128;
+constexpr int64_t TILE_K_BS1 = 512;
+
+// Batched operation tiles
+constexpr int64_t TILE_M = 32;
+constexpr int64_t TILE_N = 64;
+constexpr int64_t TILE_K = 256;
+
+// Cache line size for alignment and prefetching
+constexpr int64_t CACHE_LINE = 64;
 
 // ============================================================================
-// SHARED UTILITIES
+// HELPER FUNCTIONS
 // ============================================================================
+
+// Prefetch helper for better cache utilization
+template<int Hint = 0>
+inline void prefetch(const void* addr) {
+#if defined(__GNUC__) || defined(__clang__)
+    __builtin_prefetch(addr, 0, Hint);
+#endif
+}
+
+// Fast weight unpacking with better memory access pattern
+inline void unpack_weights_tile(
+    const uint8_t* __restrict w_packed_ptr,
+    int8_t* __restrict w_buffer,
+    int64_t n_start,
+    int64_t n_size,
+    int64_t k_start,
+    int64_t k_size,
+    int64_t K_stride
+) {
+    for (int64_t n = 0; n < n_size; ++n) {
+        const int64_t global_n = n_start + n;
+        const uint8_t* src = w_packed_ptr + global_n * K_stride + (k_start / 4);
+        int8_t* dst = w_buffer + n * k_size;
+        
+        // Prefetch next cache line
+        if (n + 1 < n_size) {
+            prefetch<1>(w_packed_ptr + (global_n + 1) * K_stride + (k_start / 4));
+        }
+        
+        for (int64_t k = 0; k < k_size; k += 4) {
+            uint8_t w_byte = src[k / 4];
+            dst[k + 0] = static_cast<int8_t>((w_byte >> 6) & 0x03) - 1;
+            dst[k + 1] = static_cast<int8_t>((w_byte >> 4) & 0x03) - 1;
+            dst[k + 2] = static_cast<int8_t>((w_byte >> 2) & 0x03) - 1;
+            dst[k + 3] = static_cast<int8_t>((w_byte      ) & 0x03) - 1;
+        }
+    }
+}
+
 // ============================================================================
 // BATCH SIZE = 1 OPTIMIZED KERNEL
 // ============================================================================
-
-// For batch_size=1, we don't need M-tiling and can simplify the kernel.
-// We process the single input row with better cache locality and less overhead.
-constexpr int64_t TILE_N_BS1 = 128;  // Larger N tile since we only have 1 row
-constexpr int64_t TILE_K_BS1 = 512;  // Larger K tile for better throughput
 
 torch::Tensor bitlinear_bs1(
     torch::Tensor x,
@@ -24,10 +73,16 @@ torch::Tensor bitlinear_bs1(
     c10::optional<torch::Tensor> bias_opt,
     float eps
 ) {
+    TORCH_CHECK(x.dim() == 2 && x.size(0) == 1, "Input must be 2D with batch size 1");
+    
+    const int64_t K = x.size(1);
+    const int64_t N = w_packed.size(0);
+    TORCH_CHECK(K % 4 == 0, "K must be a multiple of 4");
+    TORCH_CHECK(w_packed.size(1) == K / 4, "Weight packing dimension mismatch");
 
     // Activation quantization
     auto x_fp32 = x.to(torch::kFloat32);
-    auto x_scale = std::get<0>(x_fp32.abs().max(-1, true)).clamp_min(eps) / 127.0;
+    auto x_scale = std::get<0>(x_fp32.abs().max(-1, true)).clamp_min(eps) / 127.0f;
     auto x_quant = (x_fp32 / x_scale).round().clamp(-128, 127).to(torch::kInt8);
     x_scale = x_scale.squeeze(-1).contiguous();
     
@@ -37,21 +92,14 @@ torch::Tensor bitlinear_bs1(
     auto x_scale_ptr  = x_scale.data_ptr<float>();
     auto w_packed_ptr = w_packed.data_ptr<uint8_t>();
     
-    // Keep the bias tensor alive for the entire kernel (including inside the
-    // OpenMP region). We must NOT take a raw pointer to a temporary tensor
-    // that goes out of scope, otherwise bias_ptr becomes dangling and can
-    // cause use-after-free / segfaults under heavier workloads.
+    // Handle bias with proper lifetime
     torch::Tensor bias;
     float* bias_ptr = nullptr;
     if (bias_opt.has_value()) {
         bias = bias_opt->to(torch::kFloat32).contiguous();
-        bias_ptr  = bias.data_ptr<float>();
+        bias_ptr = bias.data_ptr<float>();
+        TORCH_CHECK(bias.numel() == N, "Bias size must match output features");
     }
-
-    // Dimensions
-    const int64_t K = x.size(1);
-    const int64_t N = w_packed.size(0);
-    TORCH_CHECK(K % 4 == 0, "K must be a multiple of 4");
 
     // Output buffer
     auto y = torch::zeros({1, N}, torch::kFloat32);
@@ -60,15 +108,16 @@ torch::Tensor bitlinear_bs1(
     const float w_scale_val = w_scale_ptr[0];
     const float a_scale = x_scale_ptr[0];
     const float combined_scale = a_scale * w_scale_val;
+    const int64_t K_stride = K / 4;
 
-    // Process in parallel over N dimension (output features)
+    // Parallel processing over N dimension
     #pragma omp parallel
     {
+        // Thread-local buffers (aligned for better SIMD performance)
         alignas(64) int8_t w_buffer[TILE_N_BS1 * TILE_K_BS1];
         alignas(64) int32_t acc_buffer[TILE_N_BS1];
 
-
-        #pragma omp for schedule(dynamic)
+        #pragma omp for schedule(dynamic, 1)
         for (int64_t n_tile = 0; n_tile < N; n_tile += TILE_N_BS1) {
             const int64_t n_end = std::min(n_tile + TILE_N_BS1, N);
             const int64_t n_size = n_end - n_tile;
@@ -76,30 +125,24 @@ torch::Tensor bitlinear_bs1(
             // Zero accumulators
             std::memset(acc_buffer, 0, n_size * sizeof(int32_t));
 
-            // K tiling
+            // K dimension tiling
             for (int64_t k_tile = 0; k_tile < K; k_tile += TILE_K_BS1) {
                 const int64_t k_end = std::min(k_tile + TILE_K_BS1, K);
                 const int64_t k_size = k_end - k_tile;
 
-                // Unpack weights into cache
-                for (int64_t n = 0; n < n_size; ++n) {
-                    const int64_t global_n = n_tile + n;
+                // Unpack weights for this tile
+                unpack_weights_tile(
+                    w_packed_ptr, w_buffer,
+                    n_tile, n_size,
+                    k_tile, k_size,
+                    K_stride
+                );
 
-                    for (int64_t k = 0; k < k_size; k += 4) {
-                        const int64_t global_k = k_tile + k;
-                        uint8_t w_byte = w_packed_ptr[global_n * (K / 4) + (global_k / 4)];
-
-                        w_buffer[n * k_size + k + 0] = static_cast<int8_t>((w_byte >> 6) & 0x03) - 1;
-                        w_buffer[n * k_size + k + 1] = static_cast<int8_t>((w_byte >> 4) & 0x03) - 1;
-                        w_buffer[n * k_size + k + 2] = static_cast<int8_t>((w_byte >> 2) & 0x03) - 1;
-                        w_buffer[n * k_size + k + 3] = static_cast<int8_t>(w_byte & 0x03) - 1;
-                    }
-                }
-
-                // Compute dot products - use 1x4 kernel
+                // Compute dot products using vectorized kernel
                 const int8_t* x_row = x_quant_ptr + k_tile;
 
                 int64_t n = 0;
+                // Process 4 outputs at a time with optimized kernel
                 for (; n + 3 < n_size; n += 4) {
                     const int8_t* b0 = w_buffer + (n + 0) * k_size;
                     const int8_t* b1 = w_buffer + (n + 1) * k_size;
@@ -126,7 +169,7 @@ torch::Tensor bitlinear_bs1(
                 }
             }
 
-            // Scale and write results
+            // Scale and write results with bias
             for (int64_t n = 0; n < n_size; ++n) {
                 const int64_t global_n = n_tile + n;
                 float result = static_cast<float>(acc_buffer[n]) * combined_scale;
@@ -137,22 +180,15 @@ torch::Tensor bitlinear_bs1(
 
                 y_ptr[global_n] = result;
             }
-
         }
-
     }
-
 
     return y.to(x.dtype());
 }
 
 // ============================================================================
-// BATCH SIZE > 1 OPTIMIZED KERNEL (ORIGINAL TILED IMPLEMENTATION)
+// BATCH SIZE > 1 OPTIMIZED KERNEL
 // ============================================================================
-
-constexpr int64_t TILE_M = 32;
-constexpr int64_t TILE_N = 64;
-constexpr int64_t TILE_K = 256;
 
 torch::Tensor bitlinear_batched(
     torch::Tensor x,
@@ -161,10 +197,17 @@ torch::Tensor bitlinear_batched(
     c10::optional<torch::Tensor> bias_opt,
     float eps
 ) {
+    TORCH_CHECK(x.dim() == 2, "Input must be 2D");
+    
+    const int64_t M = x.size(0);
+    const int64_t K = x.size(1);
+    const int64_t N = w_packed.size(0);
+    TORCH_CHECK(K % 4 == 0, "K must be a multiple of 4");
+    TORCH_CHECK(w_packed.size(1) == K / 4, "Weight packing dimension mismatch");
 
     // Activation quantization
     auto x_fp32 = x.to(torch::kFloat32);
-    auto x_scale = std::get<0>(x_fp32.abs().max(-1, true)).clamp_min(eps) / 127.0;
+    auto x_scale = std::get<0>(x_fp32.abs().max(-1, true)).clamp_min(eps) / 127.0f;
     auto x_quant = (x_fp32 / x_scale).round().clamp(-128, 127).to(torch::kInt8);
     x_scale = x_scale.squeeze(-1).contiguous();
     
@@ -174,36 +217,31 @@ torch::Tensor bitlinear_batched(
     auto x_scale_ptr  = x_scale.data_ptr<float>();
     auto w_packed_ptr = w_packed.data_ptr<uint8_t>();
     
-    // Same lifetime rule as in bitlinear_bs1: the bias tensor must stay alive
-    // for the duration of the OpenMP region.
+    // Handle bias with proper lifetime
     torch::Tensor bias;
     float* bias_ptr = nullptr;
     if (bias_opt.has_value()) {
         bias = bias_opt->to(torch::kFloat32).contiguous();
-        bias_ptr  = bias.data_ptr<float>();
+        bias_ptr = bias.data_ptr<float>();
+        TORCH_CHECK(bias.numel() == N, "Bias size must match output features");
     }
-
-    // Dimensions
-    const int64_t M = x.size(0);
-    const int64_t K = x.size(1);
-    const int64_t N = w_packed.size(0);
-    TORCH_CHECK(K % 4 == 0, "K must be a multiple of 4");
 
     // Output buffer
     auto y = torch::zeros({M, N}, torch::kFloat32);
     auto y_ptr = y.data_ptr<float>();
 
     const float w_scale_val = w_scale_ptr[0];
+    const int64_t K_stride = K / 4;
 
-    // Tiled matmul
+    // Tiled matmul with parallelization
     #pragma omp parallel
     {
+        // Thread-local buffers
         alignas(64) int8_t  x_buffer[TILE_M * TILE_K];
         alignas(64) int8_t  w_buffer[TILE_N * TILE_K];
         alignas(64) int32_t acc_buffer[TILE_M * TILE_N];
 
-
-        #pragma omp for collapse(2) schedule(dynamic)
+        #pragma omp for collapse(2) schedule(dynamic, 1)
         for (int64_t m_tile = 0; m_tile < M; m_tile += TILE_M) {
             for (int64_t n_tile = 0; n_tile < N; n_tile += TILE_N) {
                 const int64_t m_end  = std::min(m_tile + TILE_M, M);
@@ -211,16 +249,23 @@ torch::Tensor bitlinear_batched(
                 const int64_t m_size = m_end - m_tile;
                 const int64_t n_size = n_end - n_tile;
 
+                // Zero accumulators for this tile
                 std::memset(acc_buffer, 0, m_size * n_size * sizeof(int32_t));
 
-                // K tiling
+                // K dimension tiling
                 for (int64_t k_tile = 0; k_tile < K; k_tile += TILE_K) {
                     const int64_t k_end  = std::min(k_tile + TILE_K, K);
                     const int64_t k_size = k_end - k_tile;
 
-                    // Load activations
+                    // Load and prefetch activations
                     for (int64_t m = 0; m < m_size; ++m) {
                         const int64_t global_m = m_tile + m;
+                        
+                        // Prefetch next row
+                        if (m + 1 < m_size) {
+                            prefetch<1>(x_quant_ptr + (global_m + 1) * K + k_tile);
+                        }
+                        
                         std::memcpy(
                             &x_buffer[m * k_size],
                             &x_quant_ptr[global_m * K + k_tile],
@@ -228,49 +273,40 @@ torch::Tensor bitlinear_batched(
                         );
                     }
 
+                    // Unpack weights for this tile
+                    unpack_weights_tile(
+                        w_packed_ptr, w_buffer,
+                        n_tile, n_size,
+                        k_tile, k_size,
+                        K_stride
+                    );
 
-                    // Unpack weights
-                    for (int64_t n = 0; n < n_size; ++n) {
-                        const int64_t global_n = n_tile + n;
-
-                        for (int64_t k = 0; k < k_size; k += 4) {
-                            const int64_t global_k = k_tile + k;
-                            uint8_t w_byte = w_packed_ptr[global_n * (K / 4) + (global_k / 4)];
-
-                            w_buffer[n * k_size + k + 0] = static_cast<int8_t>((w_byte >> 6) & 0x03) - 1;
-                            w_buffer[n * k_size + k + 1] = static_cast<int8_t>((w_byte >> 4) & 0x03) - 1;
-                            w_buffer[n * k_size + k + 2] = static_cast<int8_t>((w_byte >> 2) & 0x03) - 1;
-                            w_buffer[n * k_size + k + 3] = static_cast<int8_t>(w_byte & 0x03) - 1;
-                        }
-                    }
-
-
-                    // Compute tile
+                    // Compute tile with vectorized kernels
                     for (int64_t m = 0; m < m_size; ++m) {
                         const int8_t* x_row = x_buffer + m * k_size;
+                        int32_t* acc_row = acc_buffer + m * n_size;
 
                         int64_t n = 0;
+                        // Process 4 outputs at a time
                         for (; n + 3 < n_size; n += 4) {
                             const int8_t* b0 = w_buffer + (n + 0) * k_size;
                             const int8_t* b1 = w_buffer + (n + 1) * k_size;
                             const int8_t* b2 = w_buffer + (n + 2) * k_size;
                             const int8_t* b3 = w_buffer + (n + 3) * k_size;
 
-                            int32_t& c0 = acc_buffer[m * n_size + (n + 0)];
-                            int32_t& c1 = acc_buffer[m * n_size + (n + 1)];
-                            int32_t& c2 = acc_buffer[m * n_size + (n + 2)];
-                            int32_t& c3 = acc_buffer[m * n_size + (n + 3)];
-
                             i8dot_1x4(
                                 x_row, b0, b1, b2, b3,
-                                c0, c1, c2, c3,
+                                acc_row[n + 0],
+                                acc_row[n + 1],
+                                acc_row[n + 2],
+                                acc_row[n + 3],
                                 static_cast<int32_t>(k_size)
                             );
                         }
 
+                        // Handle remaining outputs
                         for (; n < n_size; ++n) {
-                            int32_t& c = acc_buffer[m * n_size + n];
-                            c += i8dot(
+                            acc_row[n] += i8dot(
                                 x_row,
                                 w_buffer + n * k_size,
                                 static_cast<int32_t>(k_size)
@@ -279,7 +315,7 @@ torch::Tensor bitlinear_batched(
                     }
                 }
 
-                // Scale and write results
+                // Scale and write results with bias
                 for (int64_t m = 0; m < m_size; ++m) {
                     const int64_t global_m = m_tile + m;
                     const float   a_scale  = x_scale_ptr[global_m];
@@ -299,9 +335,7 @@ torch::Tensor bitlinear_batched(
                 }
             }
         }
-
     }
-
 
     return y.to(x.dtype());
 }
@@ -317,6 +351,11 @@ torch::Tensor bitlinear_cpu(
     c10::optional<torch::Tensor> bias_opt,
     float eps
 ) {
+    TORCH_CHECK(x.dim() == 2, "Input must be 2D [batch_size, features]");
+    TORCH_CHECK(w_scale.numel() == 1, "Weight scale must be a scalar");
+    TORCH_CHECK(w_packed.dim() == 2, "Packed weights must be 2D");
+    TORCH_CHECK(eps > 0, "eps must be positive");
+    
     const int64_t batch_size = x.size(0);
     
     if (batch_size == 1) {
@@ -327,7 +366,7 @@ torch::Tensor bitlinear_cpu(
 }
 
 // ============================================================================
-// WEIGHT PREPARATION (SHARED)
+// WEIGHT PREPARATION
 // ============================================================================
 
 std::tuple<torch::Tensor, torch::Tensor> prepare_weights_cpu(
@@ -335,24 +374,25 @@ std::tuple<torch::Tensor, torch::Tensor> prepare_weights_cpu(
     float eps,
     std::string quant_type
 ) {
+    TORCH_CHECK(weight.dim() == 2, "Weight must be 2D [out_features, in_features]");
+    TORCH_CHECK(eps > 0, "eps must be positive");
+    
+    const int64_t N = weight.size(0);
+    const int64_t K = weight.size(1);
+    TORCH_CHECK(K % 4 == 0, "Input features (K) must be a multiple of 4");
+
+    // Quantize weights to {-1, 0, 1}
     auto w_fp32 = weight.to(torch::kFloat32);
     auto w_scale = w_fp32.abs().mean().clamp_min(eps);
     auto w_quant = ((w_fp32 / w_scale).round().clamp(-1, 1) + 1).to(torch::kInt8);
 
-    const int64_t N = weight.size(0);
-    const int64_t K = weight.size(1);
-    TORCH_CHECK(K % 4 == 0, "K must be a multiple of 4");
-
-    auto w_quant_ptr = w_quant.data_ptr<int8_t>();
+    // Pack 4 x 2-bit weights into each uint8
     auto w_packed = torch::zeros({N, K / 4}, torch::kUInt8);
+    auto w_quant_ptr = w_quant.data_ptr<int8_t>();
     auto w_packed_ptr = w_packed.data_ptr<uint8_t>();
 
-    // NOTE: Use a simple serial loop here instead of OpenMP. This packing
-    // routine is relatively cheap compared to the matmul kernels, and using
-    // OpenMP inside this function has caused crashes on some platforms when
-    // combined with PyTorch's own threading. Keeping it serial is safer and
-    // still fast enough.
-    for (int64_t n = 0; n < N; n++) {
+    // Serial packing (safe and fast enough for one-time setup)
+    for (int64_t n = 0; n < N; ++n) {
         for (int64_t k = 0; k < K; k += 4) {
             uint8_t w0 = static_cast<uint8_t>(w_quant_ptr[n * K + k + 0]);
             uint8_t w1 = static_cast<uint8_t>(w_quant_ptr[n * K + k + 1]);
@@ -360,7 +400,7 @@ std::tuple<torch::Tensor, torch::Tensor> prepare_weights_cpu(
             uint8_t w3 = static_cast<uint8_t>(w_quant_ptr[n * K + k + 3]);
 
             w_packed_ptr[n * (K / 4) + (k / 4)] =
-                static_cast<uint8_t>((w0 << 6) | (w1 << 4) | (w2 << 2) | w3);
+                (w0 << 6) | (w1 << 4) | (w2 << 2) | w3;
         }
     }
     

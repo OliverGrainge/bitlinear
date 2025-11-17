@@ -20,10 +20,10 @@ def _synchronize_if_needed(device: torch.device) -> None:
 
 def benchmark(layer: BitLinear, x: torch.Tensor, label: str) -> None:
     device = x.device
-    layer.to(device)
-
     batch_size = x.shape[0]
-    ops_per_forward = 2 * batch_size * IN_FEATURES * OUT_FEATURES
+    in_features = getattr(layer, "in_features", IN_FEATURES)
+    out_features = getattr(layer, "out_features", OUT_FEATURES)
+    ops_per_forward = 2 * batch_size * in_features * out_features
 
     # Warmup to avoid cold-start effects.
     with torch.inference_mode():
