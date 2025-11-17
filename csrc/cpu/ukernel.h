@@ -1,7 +1,9 @@
 // Implementation of int8 dot-product micro-kernels for different architectures.
 // The appropriate backend is selected at compile time via architecture macros.
 
-#include "ukernel.h"
+#pragma once
+
+#include <cstdint>
 #include <iostream>
 
 // ---------------------------------------------------------------------------
@@ -11,7 +13,7 @@
 
 #include <arm_neon.h>
 
-int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
+inline int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
     int32x4_t acc0 = vdupq_n_s32(0);
     int32x4_t acc1 = vdupq_n_s32(0);
     int32x4_t acc2 = vdupq_n_s32(0);
@@ -51,7 +53,7 @@ int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
     return sum;
 }
 
-void i8dot_1x4(
+inline void i8dot_1x4(
     const int8_t* __restrict a,
     const int8_t* __restrict b0,
     const int8_t* __restrict b1,
@@ -148,7 +150,7 @@ void i8dot_1x4(
 
 #include <immintrin.h>
 
-int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
+inline int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
     
     __m256i vacc = _mm256_setzero_si256();
     int32_t i = 0;
@@ -187,7 +189,7 @@ int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
     return sum;
 }
 
-void i8dot_1x4(
+inline void i8dot_1x4(
     const int8_t* __restrict a,
     const int8_t* __restrict b0,
     const int8_t* __restrict b1,
@@ -281,7 +283,7 @@ void i8dot_1x4(
 
 #include <omp.h>
 
-int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
+inline int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
     
     int32_t sum = 0;
     
@@ -293,7 +295,7 @@ int32_t i8dot(const int8_t* a, const int8_t* b, int32_t length) {
     return sum;
 }
 
-void i8dot_1x4(
+inline void i8dot_1x4(
     const int8_t* __restrict a,
     const int8_t* __restrict b0,
     const int8_t* __restrict b1,

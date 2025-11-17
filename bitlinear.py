@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch import nn
 
 try:
-    import bitlinear as bnn
+    import _bitlinear as bnn
 
     HAS_BITLINEAR = True
 except ImportError:
@@ -19,7 +19,7 @@ def quantize_act(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Quantize activations to int8 range [-127, 127].
-    
+
     Returns:
         x_scale: Scale factor for dequantization (NOT inverse scale!)
         x_quant: Quantized activations
@@ -36,7 +36,7 @@ def quantize_weight(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Quantize weights to ternary values {-1, 0, 1}.
-    
+
     Returns:
         w_scale: Scale factor for dequantization (NOT inverse scale!)
         w_quant: Quantized weights
@@ -57,7 +57,7 @@ def _fallback_bitlinear(
 ) -> torch.Tensor:
     """
     Fallback Python implementation of bitlinear forward pass.
-    
+
     Args:
         x: Input activations
         w_scale: Weight scale factor
@@ -68,10 +68,10 @@ def _fallback_bitlinear(
     x_scale, x_quant = quantize_act(x, eps)
     # Straight-through estimator: forward uses quantized, backward uses original
     x_dequant = x + ((x_scale * x_quant) - x).detach()
-    
+
     # In fallback, w_packed contains the quantized weights directly
     w_dequant = w_scale * w_packed
-    
+
     return F.linear(x_dequant, w_dequant, bias)
 
 
@@ -82,7 +82,7 @@ def _fallback_prepare_weights(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Fallback Python implementation of weight preparation.
-    
+
     Returns:
         w_scale: Weight scale factor
         w_quant: Quantized weights (not packed in fallback)
@@ -132,15 +132,17 @@ class BitLinear(nn.Module):
         # quantize_weight and quantize_act return (scale, quant), not (inv_scale, quant)
         w_scale, w_quant = quantize_weight(self.weight, self.eps)
         x_scale, x_quant = quantize_act(x, self.eps)
-        
+
         # Apply straight-through estimator for training
         w_dequant = self.weight + ((w_scale * w_quant) - self.weight).detach()
         x_dequant = x + ((x_scale * x_quant) - x).detach()
-        
+
         return F.linear(x_dequant, w_dequant, self.bias)
 
     @classmethod
-    def from_linear(cls, linear: nn.Linear, quant_type: str, eps: float = 1e-6) -> "BitLinear":
+    def from_linear(
+        cls, linear: nn.Linear, quant_type: str, eps: float = 1e-6
+    ) -> "BitLinear":
         """Create a BitLinear layer from an existing nn.Linear layer."""
         qt = getattr(linear, "quant_type", quant_type)
         layer = cls(
@@ -166,7 +168,7 @@ class BitLinear(nn.Module):
         """
         # Save bias data before modifying parameters
         bias_data = self.bias.data.clone() if self.bias is not None else None
-        
+
         # Use fallback if bitlinear is not available
         if HAS_BITLINEAR:
             # The C++ extension is CPU-only. Guard explicitly against CUDA
@@ -193,26 +195,26 @@ class BitLinear(nn.Module):
 
         # Delete original weight parameter
         del self.weight
-        
+
         # Delete original bias parameter if it exists
         if self.bias is not None:
             del self.bias
-        
+
         # Register packed weights and scale as buffers
         self.register_buffer("w_scale", w_scale)
         self.register_buffer("w_packed", w_packed)
-        
+
         # Register bias as buffer (not bias_buffer!) if it exists
         if bias_data is not None:
             self.register_buffer("bias", bias_data)
-        
+
         # Switch to optimized forward pass
         self.forward = self._deploy_forward
 
     def _deploy_forward(self, x: torch.Tensor) -> torch.Tensor:
         """Run the quantized inference pathway after `deploy` has packed the weights."""
         # Get bias - it's stored as self.bias (a buffer), not self.bias_buffer
-        bias = self.bias if hasattr(self, 'bias') else None
+        bias = self.bias if hasattr(self, "bias") else None
 
         # Use fallback if bitlinear is not available
         if HAS_BITLINEAR:

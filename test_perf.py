@@ -3,7 +3,8 @@ import time
 
 import torch
 
-from main import BitLinear
+import bitlinear as bitlinear_module
+from bitlinear import BitLinear
 
 
 IN_FEATURES = 1024
@@ -41,7 +42,9 @@ def benchmark(layer: BitLinear, x: torch.Tensor, label: str) -> None:
     avg_ms = (duration / ITERS) * 1e3
     throughput = (batch_size * ITERS) / duration
     gflops = (ops_per_forward * ITERS) / duration / 1e9
-    print(f"{label}: {avg_ms:.3f} ms/run, {throughput:.2f} samples/s, {gflops:.2f} GFLOP/s")
+    print(
+        f"{label}: {avg_ms:.3f} ms/run, {throughput:.2f} samples/s, {gflops:.2f} GFLOP/s"
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,13 +52,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--device",
         default=None,
-        choices=("cpu", "cuda"),
-        help="Device to run on. Defaults to cuda if available, else cpu.",
+        help=(
+            "Training device (e.g. cpu, cuda, cuda:1, mps). Defaults to cpu to match "
+            "the optimized inference path."
+        ),
+    )
+    parser.add_argument(
+        "--deploy-device",
+        default=None,
+        help=(
+            "Device to benchmark the deployed inference path on. Defaults to --device."
+        ),
     )
     return parser.parse_args()
 
 
-def resolve_device(device_arg: str | None) -> torch.device:
+def resolve_device(
+    device_arg: str | None, *, default: torch.device | None = None
+) -> torch.device:
     """
     Resolve the device to run on.
 
@@ -65,25 +79,58 @@ def resolve_device(device_arg: str | None) -> torch.device:
     To keep the perf script robust across machines with/without GPUs, we
     default to CPU here.
     """
-    if device_arg == "cuda":
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA requested but torch.cuda.is_available() is False")
-        return torch.device("cuda")
-    if device_arg == "cpu" or device_arg is None:
+    if device_arg is None:
+        if default is not None:
+            return default
         return torch.device("cpu")
-    # Fallback: be conservative and use CPU
-    return torch.device("cpu")
+    if device_arg == "cpu":
+        return torch.device("cpu")
+
+    try:
+        device = torch.device(device_arg)
+    except (TypeError, RuntimeError) as exc:
+        raise ValueError(f"Invalid device specification: {device_arg}") from exc
+
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA requested but torch.cuda.is_available() is False")
+    if device.type == "mps" and not torch.backends.mps.is_available():
+        raise RuntimeError("MPS requested but torch.backends.mps.is_available() is False")
+
+    return device
 
 
 def main() -> None:
     args = parse_args()
-    device = resolve_device(args.device)
+    train_device = resolve_device(args.device)
+    deploy_device = resolve_device(args.deploy_device, default=train_device)
+
+    if (
+        deploy_device.type != "cpu"
+        and bitlinear_module.HAS_BITLINEAR
+        and not getattr(bitlinear_module, "_has_warned_fallback", False)
+    ):
+        print(
+            "NOTE: Forcing fallback Python implementation for deployment benchmarks "
+            f"to honor deploy device '{deploy_device}'."
+        )
+        bitlinear_module.HAS_BITLINEAR = False
+        bitlinear_module._has_warned_fallback = True
+
     for batch_size in (1, 1024):
         print(f"\n=== batch_size={batch_size} ===")
-        layer = BitLinear(IN_FEATURES, OUT_FEATURES).to(device)
-        x = torch.randn(batch_size, IN_FEATURES, device=device, dtype=torch.float32)
+        layer = BitLinear(IN_FEATURES, OUT_FEATURES).to(train_device)
+        x = torch.randn(
+            batch_size, IN_FEATURES, device=train_device, dtype=torch.float32
+        )
 
-        benchmark(layer, x, f"Training-mode (before deployment), batch={batch_size}")
+        benchmark(
+            layer, x, f"Training-mode (before deployment), batch={batch_size}"
+        )
+
+        if train_device != deploy_device:
+            _synchronize_if_needed(train_device)
+            layer = layer.to(deploy_device)
+            x = x.to(deploy_device)
 
         layer.deploy()
         benchmark(layer, x, f"Deployment-mode (after deployment), batch={batch_size}")
@@ -91,5 +138,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
