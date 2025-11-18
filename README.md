@@ -13,6 +13,20 @@ BitLinear is a binary neural network linear layer implementation that quantizes 
 - **Flexible quantization**: Configurable quantization types for different use cases
 - **PyTorch integration**: Seamless integration with PyTorch's `nn.Module` API
 
+## Performance
+
+### Latency Comparison
+
+![Latency Comparison](profile/plots/latency_comparison.png)
+
+### Throughput Comparison
+
+![Throughput Comparison](profile/plots/throughput_comparison.png)
+
+### Static Memory
+
+![Static Memory](profile/plots/static_memory.png)
+
 ## Quick Start
 
 ```bash
@@ -190,25 +204,35 @@ If the kernels didn't build or you see import errors:
 
 7. **macOS runtime linking issues:** If you get `Library not loaded: @rpath/libc10.dylib` errors on macOS:
    
-   The extension was built but can't find PyTorch libraries at runtime. Try:
+   The extension was built but can't find PyTorch libraries at runtime. This is a common issue with editable installs on macOS.
    
+   **Quick fix using the helper script:**
    ```bash
-   # Rebuild with clean cache
-   rm -rf build dist *.egg-info
-   pip install -e . --no-cache-dir
-   
-   # If that doesn't work, you may need to fix the library path manually
-   # Find your PyTorch lib directory:
-   python -c "import torch; from pathlib import Path; print(Path(torch.__file__).parent / 'lib')"
-   
-   # Then fix the extension's rpath (replace PATH_TO_TORCH_LIB with output above):
-   install_name_tool -add_rpath PATH_TO_TORCH_LIB _bitlinear*.so
+   ./fix_rpath_macos.sh
    ```
    
-   Or use a non-editable install which often works better:
+   **Manual fix:**
    ```bash
+   # Find your PyTorch lib directory:
+   PYTORCH_LIB=$(python -c "import torch; from pathlib import Path; print(Path(torch.__file__).parent / 'lib')")
+   
+   # Find the extension file
+   EXT_FILE=$(find . -name "_bitlinear*.so" | head -1)
+   
+   # Fix the rpath
+   install_name_tool -add_rpath "$PYTORCH_LIB" "$EXT_FILE"
+   
+   # Verify it worked
+   python -c "import _bitlinear; print('✓ Success!')"
+   ```
+   
+   **Alternative: Use non-editable install** (often works better on macOS):
+   ```bash
+   rm -rf build dist *.egg-info
    pip install . --no-cache-dir
    ```
+   
+   **If the automatic rpath fix in setup.py didn't work**, the helper script should fix it. The custom BuildExtension tries to fix this automatically, but sometimes it needs to be run manually.
 
 ## Usage
 
