@@ -9,7 +9,7 @@ from bitlinear import BitLinear
 layer = BitLinear(512, 256)  # drop-in replacement for nn.Linear(512, 256)
 ```
 
-Ternary networks—using weights in `{−1, 0, +1}`—have been shown in work such as **BitNet**, **Spectra**, and **TeTRA-VPR** to preserve FP16/BF16-level accuracy while offering dramatic theoretical reductions in memory footprint and bandwidth use.  
+Ternary networks—using weights in `{−1, 0, +1}`—have been shown in work such as [**BitNet**](https://github.com/microsoft/BitNet), [**Spectra**](https://github.com/NolanoOrg/SpectraSuite), and [**TeTRA-VPR**](https://arxiv.org/abs/2503.02511) to preserve FP16/BF16-level accuracy while offering dramatic theoretical reductions in memory footprint and bandwidth use.  
 
 In standard frameworks, however, these advantages vanish: PyTorch expands ternary weights back to 8- or 16-bit formats, eliminating actual speedups and bloating memory traffic.
 
@@ -188,6 +188,22 @@ python test_perf.py
   ```bash
   rm -rf build/ dist/ bitlinear.egg-info/
   ```
+
+---
+
+## Citation
+
+If you use BitLinear in your research, please cite:
+
+```bibtex
+@article{grainge2025tetra,
+  title={TeTRA-VPR: A Ternary Transformer Approach for Compact Visual Place Recognition},
+  author={Grainge, Oliver and Milford, Michael J and Bodala, Indu and Ramchurn, Sarvapali D and Ehsan, Shoaib},
+  journal={IEEE Robotics and Automation Letters},
+  year={2025},
+  publisher={IEEE}
+}
+```
 
 ---
 
