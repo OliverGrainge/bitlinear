@@ -1,74 +1,72 @@
 # BitLinear
-
-Efficient Memory and Latency optimized BitLinear implementation with CPU and CUDA support for PyTorch.
-
-## Latency Overview
-
 ![Latency Comparison](profile/plots/latency_comparison.png)
 
-BitLinear's execution path is built around **2-bit weight packing**, fused quantized arithmetic, and hardware-specific vectorization. All kernels are aggressively tuned for low-latency inference using:
+**BitLinear is a hardware-optimized ternary linear layer for PyTorch**, designed to close the gap between the *theoretical* efficiency of ternary networks and their *practical* realized performance on modern CPUs and GPUs.
 
-- **ARM NEON** and **NEON DotProd**
-- **x86 AVX2**, **AVX-VNNI**, **AVX512-VNNI**
-- **CUDA** bit-packed GPU kernels
+```python
+# Simply replace nn.Linear with BitLinear
+from bitlinear import BitLinear
+layer = BitLinear(512, 256)  # drop-in replacement for nn.Linear(512, 256)
+```
 
-These implementations reduce memory bandwidth pressure while maximizing arithmetic intensity, yielding the latency characteristics shown above.
+Ternary networks—using weights in `{−1, 0, +1}`—have been shown in work such as **BitNet**, **Spectra**, and **TeTRA-VPR** to preserve FP16/BF16-level accuracy while offering dramatic theoretical reductions in memory footprint and bandwidth use.  
+
+In standard frameworks, however, these advantages vanish: PyTorch expands ternary weights back to 8- or 16-bit formats, eliminating actual speedups and bloating memory traffic.
+
+**BitLinear fixes this.**  
+It introduces **true 2-bit weight packing** and **custom CPU/GPU kernels** that operate directly on packed ternary weights—yielding real, measurable gains in latency, throughput, and model size.
 
 ---
 
-## Description
+## Highlights
 
-BitLinear is a binary / ternary neural network linear layer implementation that quantizes weights to `{−1, 0, 1}` and activations to int8. This package provides optimized CPU and CUDA kernels for efficient inference.
+- **True 2-bit weight storage**  
+  No expansion to 8/16-bit tensors at runtime.
 
-## Features
+- **Hardware-specialized kernels**  
+  - ARM **NEON**, **NEON-DotProd**  
+  - x86 **AVX2**, **AVX-VNNI**, **AVX512-VNNI**  
+  - CUDA **bit-packed GPU kernels**
 
-- **Highly-optimized kernels**
-  - 2-bit weight packing for minimal bandwidth
-  - Hardware-specific SIMD kernels: NEON, AVX2, AVX-VNNI, AVX512-VNNI
-  - CUDA kernels for GPU bit-packed matrix multiplication
-- **CPU and CUDA support**: Optimized backends for both CPU (with OpenMP) and CUDA
-- **Training and deployment modes**: Supports both training with gradient flow and efficient inference
-- **Flexible quantization**: Multiple quantization types for different model families
-- **PyTorch integration**: Seamless integration with PyTorch's `nn.Module` API
+- **End-to-end PyTorch integration**  
+  Drop-in `nn.Module` replacement; no custom graph rewrites.
+
+- **Training-friendly**  
+  Works with standard QAT pipelines—no need to hand-implement ternary quantizers or STE logic.
+
+- **Deployment-ready operator**  
+  Fused, bandwidth-efficient inference kernels for CPU and GPU.
+
+---
 
 ## Performance
 
-### Latency Comparison
+### Latency
+
+The kernels are engineered for low-latency inference through aggressive vectorization, bit-packing, and reduced memory traffic.
 
 ![Latency Comparison](profile/plots/latency_comparison.png)
 
-### Throughput Comparison
+---
 
-![Throughput Comparison](profile/plots/throughput_comparison.png)
+### Static Memory Footprint
 
-### Static Memory
+BitLinear reduces the effective layer memory by **~94%**, enabling significantly higher model density on-device.
 
-<img src="profile/plots/static_memory.png" alt="Static Memory" width="400"/>
+![Static Memory](profile/plots/static_memory.png)
 
-## Quick Start
-
-```bash
-git clone https://github.com/OliverGrainge/bitlinear.git
-cd bitlinear
-pip install -e .
-python -c "import _bitlinear; print('✓ Kernels built successfully!')"
-```
+---
 
 ## Installation
 
-### Prerequisites
+### Requirements
+- Python ≥ 3.7  
+- PyTorch ≥ 1.13  
+- C++17 compiler (gcc/clang/MSVC)  
+- CUDA Toolkit (optional, for GPU support)  
+- OpenMP (for parallel CPU kernels)
 
-- Python >= 3.7
-- PyTorch >= 1.13.0
-- C++ compiler (gcc/clang/MSVC)
-- CUDA toolkit (optional, for GPU support)
-- OpenMP (for CPU parallelization)
-
-### Building the Kernels
-
-Kernels are compiled during installation.
-
-#### Editable Install (Recommended)
+### Editable Install (recommended)
 
 ```bash
 git clone https://github.com/OliverGrainge/bitlinear.git
@@ -76,85 +74,125 @@ cd bitlinear
 pip install -e .
 ```
 
-#### Regular Install
-
-```bash
-pip install .
-```
-
-During installation BitLinear will:
-1. Detect CUDA availability
-2. Build CPU kernels
-3. Build CUDA kernels (if available)
-4. Produce the `_bitlinear` extension module
-
-#### Verify the Kernels Were Built
+### Verify Kernel Build
 
 ```bash
 python -c "import _bitlinear; print('✓ Kernels built successfully!')"
 ```
 
-## Troubleshooting Build Issues
-
-1. Verify PyTorch installation  
-2. Verify compiler availability  
-3. Inspect build output  
-4. Force clean rebuild  
-5. Confirm `_bitlinear` extension exists  
-6. Use verbose install mode  
-7. On macOS, fix missing rpath if needed  
+---
 
 ## Usage
 
-### Basic Usage
+### Basic Example
 
 ```python
 import torch
 from bitlinear import BitLinear
 
-layer = BitLinear(in_features=512, out_features=256, bias=True)
+layer = BitLinear(512, 256, bias=True)
 x = torch.randn(32, 512)
-output = layer(x)
+
+out = layer(x)
+```
+
+### Quantization-Aware Training (QAT)
+
+BitLinear works seamlessly with standard PyTorch training pipelines. During training, the layer quantizes weights and activations on-the-fly while preserving gradient flow through the straight-through estimator (STE). Simply use it like any other `nn.Module`:
+
+```python
+import torch
+import torch.nn as nn
+from bitlinear import BitLinear
+
+# Replace nn.Linear with BitLinear in your model
+model = nn.Sequential(
+    BitLinear(512, 256),
+    nn.ReLU(),
+    BitLinear(256, 128),
+)
+
+# Train normally - gradients flow through quantization
+optimizer = torch.optim.Adam(model.parameters())
+loss_fn = nn.MSELoss()
+
+for x, y in dataloader:
+    optimizer.zero_grad()
+    out = model(x)
+    loss = loss_fn(out, y)
+    loss.backward()  # Gradients computed normally
+    optimizer.step()
 ```
 
 ### Deployment Mode
 
+After training, call `deploy()` to optimize the layer for inference. This method:
+1. **Quantizes and packs weights** into a 2-bit representation (4 weights per byte)
+2. **Removes the original FP32 parameters** to save memory
+3. **Switches to optimized inference kernels** that operate directly on packed weights
+
+Once deployed, the layer uses hardware-optimized kernels for maximum throughput and minimal memory footprint:
+
 ```python
-layer.deploy()
+# After training, deploy for inference
+model.eval()
+for layer in model:
+    if isinstance(layer, BitLinear):
+        layer.deploy()
+
+# Run inference with optimized kernels
 with torch.no_grad():
-    output = layer(x)
+    out = model(x)
 ```
 
-### Convert from Standard Linear
+**Note:** Deployed layers are inference-only and cannot be trained further. The original parameters are replaced with packed buffers.
+
+### Converting from a Standard Linear Layer
+
+You can convert an existing `nn.Linear` layer to `BitLinear`:
 
 ```python
 from torch import nn
 from bitlinear import BitLinear
 
-linear = nn.Linear(512, 256)
-bitlinear = BitLinear.from_linear(linear, quant_type="ai8pc_wpt")
+dense = nn.Linear(512, 256)
+ternary = BitLinear.from_linear(dense)
 ```
+
+---
 
 ## Development
 
-### Build Locally
+### Build locally
 
 ```bash
 ./build.sh
 pip install -e .
 ```
 
-### Testing
+### Tests
 
 ```bash
 pytest test.py
 python test_perf.py
 ```
 
-## License
+---
 
-MIT License
+## Troubleshooting
+
+- Ensure PyTorch is installed with matching CUDA version  
+- Confirm compiler availability  
+- Use `pip install -vvv .` for verbose build logs  
+- Delete old build artifacts:
+  ```bash
+  rm -rf build/ dist/ bitlinear.egg-info/
+  ```
+
+---
+
+## License
+**MIT License**
 
 ## Contributing
-
-Contributions are welcome! Please submit a Pull Request.
+Pull requests are welcome—please open an issue first for major changes.

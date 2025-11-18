@@ -141,7 +141,7 @@ class BitLinear(nn.Module):
 
     @classmethod
     def from_linear(
-        cls, linear: nn.Linear, quant_type: str, eps: float = 1e-6
+        cls, linear: nn.Linear, quant_type: str = "ai8pc_wpt", eps: float = 1e-6
     ) -> "BitLinear":
         """Create a BitLinear layer from an existing nn.Linear layer."""
         qt = getattr(linear, "quant_type", quant_type)
