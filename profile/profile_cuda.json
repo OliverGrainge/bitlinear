@@ -1,0 +1,538 @@
+{
+  "train_device": "cuda",
+  "deploy_device": "cuda",
+  "in_features": 1024,
+  "out_features": 1024,
+  "warmup_iters": 5,
+  "benchmark_iters": 20,
+  "results": [
+    {
+      "mode": "eval",
+      "label": "Eval mode, batch=1",
+      "batch_size": 1,
+      "latency_ms": 0.14773542061448097,
+      "throughput_samples_per_sec": 6768.857433381013,
+      "gflops": 14.195322904129858,
+      "model_memory_mb": 4.00390625,
+      "memory_before_mb": {
+        "allocated_mb": 4.0078125,
+        "reserved_mb": 22.0,
+        "max_allocated_mb": 4.0078125
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 12.1328125,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 24.1376953125
+      },
+      "memory_after_mb": {
+        "allocated_mb": 12.1328125,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 24.1376953125
+      }
+    },
+    {
+      "mode": "deploy",
+      "label": "Deploy mode, batch=1",
+      "batch_size": 1,
+      "latency_ms": 0.09519020095467567,
+      "throughput_samples_per_sec": 10505.283001515512,
+      "gflops": 22.03117525719426,
+      "model_memory_mb": 4.003910064697266,
+      "memory_before_mb": {
+        "allocated_mb": 20.1337890625,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 20.1337890625
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 20.1337890625,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 25.14599609375
+      },
+      "memory_after_mb": {
+        "allocated_mb": 20.1337890625,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 25.14599609375
+      }
+    },
+    {
+      "mode": "eval",
+      "label": "Eval mode, batch=2",
+      "batch_size": 2,
+      "latency_ms": 0.14231838285923004,
+      "throughput_samples_per_sec": 14052.998353545374,
+      "gflops": 29.47127360313439,
+      "model_memory_mb": 4.00390625,
+      "memory_before_mb": {
+        "allocated_mb": 24.1416015625,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 24.1416015625
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 24.1416015625,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 36.150390625
+      },
+      "memory_after_mb": {
+        "allocated_mb": 24.1416015625,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 36.150390625
+      }
+    },
+    {
+      "mode": "deploy",
+      "label": "Deploy mode, batch=2",
+      "batch_size": 2,
+      "latency_ms": 0.08985428139567375,
+      "throughput_samples_per_sec": 22258.260473899853,
+      "gflops": 46.67895546936003,
+      "model_memory_mb": 4.003910064697266,
+      "memory_before_mb": {
+        "allocated_mb": 32.142578125,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 32.142578125
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 32.142578125,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 37.16650390625
+      },
+      "memory_after_mb": {
+        "allocated_mb": 32.142578125,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 37.16650390625
+      }
+    },
+    {
+      "mode": "eval",
+      "label": "Eval mode, batch=4",
+      "batch_size": 4,
+      "latency_ms": 0.14179954305291176,
+      "throughput_samples_per_sec": 28208.835613154417,
+      "gflops": 59.15821602379801,
+      "model_memory_mb": 4.00390625,
+      "memory_before_mb": {
+        "allocated_mb": 36.154296875,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 36.154296875
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 36.154296875,
+        "reserved_mb": 62.0,
+        "max_allocated_mb": 48.1708984375
+      },
+      "memory_after_mb": {
+        "allocated_mb": 36.154296875,
+        "reserved_mb": 62.0,
+        "max_allocated_mb": 48.1708984375
+      }
+    },
+    {
+      "mode": "deploy",
+      "label": "Deploy mode, batch=4",
+      "batch_size": 4,
+      "latency_ms": 0.08922778069972992,
+      "throughput_samples_per_sec": 44829.08762979137,
+      "gflops": 94.01341078099223,
+      "model_memory_mb": 4.003910064697266,
+      "memory_before_mb": {
+        "allocated_mb": 44.1552734375,
+        "reserved_mb": 62.0,
+        "max_allocated_mb": 44.1552734375
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 44.1552734375,
+        "reserved_mb": 62.0,
+        "max_allocated_mb": 49.20263671875
+      },
+      "memory_after_mb": {
+        "allocated_mb": 44.1552734375,
+        "reserved_mb": 62.0,
+        "max_allocated_mb": 49.20263671875
+      }
+    },
+    {
+      "mode": "eval",
+      "label": "Eval mode, batch=8",
+      "batch_size": 8,
+      "latency_ms": 0.14147646725177765,
+      "throughput_samples_per_sec": 56546.506676356665,
+      "gflops": 118.58661956933473,
+      "model_memory_mb": 4.00390625,
+      "memory_before_mb": {
+        "allocated_mb": 48.1748046875,
+        "reserved_mb": 62.0,
+        "max_allocated_mb": 48.1748046875
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 48.1748046875,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 60.20703125
+      },
+      "memory_after_mb": {
+        "allocated_mb": 48.1748046875,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 60.20703125
+      }
+    },
+    {
+      "mode": "deploy",
+      "label": "Deploy mode, batch=8",
+      "batch_size": 8,
+      "latency_ms": 0.0894562341272831,
+      "throughput_samples_per_sec": 89429.2061145473,
+      "gflops": 187.54663846153508,
+      "model_memory_mb": 4.003910064697266,
+      "memory_before_mb": {
+        "allocated_mb": 56.17578125,
+        "reserved_mb": 62.0,
+        "max_allocated_mb": 56.17578125
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 56.17578125,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 61.27001953125
+      },
+      "memory_after_mb": {
+        "allocated_mb": 56.17578125,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 61.27001953125
+      }
+    },
+    {
+      "mode": "eval",
+      "label": "Eval mode, batch=16",
+      "batch_size": 16,
+      "latency_ms": 0.14222543686628342,
+      "throughput_samples_per_sec": 112497.45722379307,
+      "gflops": 235.92426741179207,
+      "model_memory_mb": 4.00390625,
+      "memory_before_mb": {
+        "allocated_mb": 60.2109375,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 60.2109375
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 60.2109375,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 72.2744140625
+      },
+      "memory_after_mb": {
+        "allocated_mb": 60.2109375,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 72.2744140625
+      }
+    },
+    {
+      "mode": "deploy",
+      "label": "Deploy mode, batch=16",
+      "batch_size": 16,
+      "latency_ms": 0.08921278640627861,
+      "throughput_samples_per_sec": 179346.4888220771,
+      "gflops": 376.1168477261967,
+      "model_memory_mb": 4.003910064697266,
+      "memory_before_mb": {
+        "allocated_mb": 68.2119140625,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 68.2119140625
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 68.2119140625,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 73.39990234375
+      },
+      "memory_after_mb": {
+        "allocated_mb": 68.2119140625,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 73.39990234375
+      }
+    },
+    {
+      "mode": "eval",
+      "label": "Eval mode, batch=32",
+      "batch_size": 32,
+      "latency_ms": 0.1483348198235035,
+      "throughput_samples_per_sec": 215728.17520576267,
+      "gflops": 452.4147740891156,
+      "model_memory_mb": 4.00390625,
+      "memory_before_mb": {
+        "allocated_mb": 72.2783203125,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 72.2783203125
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 72.2783203125,
+        "reserved_mb": 102.0,
+        "max_allocated_mb": 84.404296875
+      },
+      "memory_after_mb": {
+        "allocated_mb": 72.2783203125,
+        "reserved_mb": 102.0,
+        "max_allocated_mb": 84.404296875
+      }
+    },
+    {
+      "mode": "deploy",
+      "label": "Deploy mode, batch=32",
+      "batch_size": 32,
+      "latency_ms": 0.09498037397861481,
+      "throughput_samples_per_sec": 336911.70775138156,
+      "gflops": 706.5550617342253,
+      "model_memory_mb": 4.003910064697266,
+      "memory_before_mb": {
+        "allocated_mb": 80.279296875,
+        "reserved_mb": 102.0,
+        "max_allocated_mb": 80.279296875
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 80.279296875,
+        "reserved_mb": 102.0,
+        "max_allocated_mb": 85.65478515625
+      },
+      "memory_after_mb": {
+        "allocated_mb": 80.279296875,
+        "reserved_mb": 102.0,
+        "max_allocated_mb": 85.65478515625
+      }
+    },
+    {
+      "mode": "eval",
+      "label": "Eval mode, batch=64",
+      "batch_size": 64,
+      "latency_ms": 0.14866339042782784,
+      "throughput_samples_per_sec": 430502.76073900197,
+      "gflops": 902.8297256893195,
+      "model_memory_mb": 4.00390625,
+      "memory_before_mb": {
+        "allocated_mb": 84.408203125,
+        "reserved_mb": 102.0,
+        "max_allocated_mb": 84.408203125
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 84.408203125,
+        "reserved_mb": 104.0,
+        "max_allocated_mb": 96.6591796875
+      },
+      "memory_after_mb": {
+        "allocated_mb": 84.408203125,
+        "reserved_mb": 104.0,
+        "max_allocated_mb": 96.6591796875
+      }
+    },
+    {
+      "mode": "deploy",
+      "label": "Deploy mode, batch=64",
+      "batch_size": 64,
+      "latency_ms": 0.09631169959902763,
+      "throughput_samples_per_sec": 664509.0914857674,
+      "gflops": 1393.57657022756,
+      "model_memory_mb": 4.003910064697266,
+      "memory_before_mb": {
+        "allocated_mb": 92.4091796875,
+        "reserved_mb": 102.0,
+        "max_allocated_mb": 92.4091796875
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 92.4091796875,
+        "reserved_mb": 104.0,
+        "max_allocated_mb": 98.15966796875
+      },
+      "memory_after_mb": {
+        "allocated_mb": 92.4091796875,
+        "reserved_mb": 104.0,
+        "max_allocated_mb": 98.15966796875
+      }
+    },
+    {
+      "mode": "eval",
+      "label": "Eval mode, batch=128",
+      "batch_size": 128,
+      "latency_ms": 0.14916593208909035,
+      "throughput_samples_per_sec": 858104.784432622,
+      "gflops": 1799.576164882442,
+      "model_memory_mb": 4.00390625,
+      "memory_before_mb": {
+        "allocated_mb": 96.6630859375,
+        "reserved_mb": 102.0,
+        "max_allocated_mb": 96.6630859375
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 84.658203125,
+        "reserved_mb": 104.0,
+        "max_allocated_mb": 97.1591796875
+      },
+      "memory_after_mb": {
+        "allocated_mb": 84.658203125,
+        "reserved_mb": 104.0,
+        "max_allocated_mb": 97.1591796875
+      }
+    },
+    {
+      "mode": "deploy",
+      "label": "Deploy mode, batch=128",
+      "batch_size": 128,
+      "latency_ms": 0.09720772504806519,
+      "throughput_samples_per_sec": 1316767.7768069287,
+      "gflops": 2761.462176666204,
+      "model_memory_mb": 4.003910064697266,
+      "memory_before_mb": {
+        "allocated_mb": 92.6591796875,
+        "reserved_mb": 102.0,
+        "max_allocated_mb": 92.6591796875
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 92.6591796875,
+        "reserved_mb": 104.0,
+        "max_allocated_mb": 99.15966796875
+      },
+      "memory_after_mb": {
+        "allocated_mb": 92.6591796875,
+        "reserved_mb": 104.0,
+        "max_allocated_mb": 99.15966796875
+      }
+    },
+    {
+      "mode": "eval",
+      "label": "Eval mode, batch=256",
+      "batch_size": 256,
+      "latency_ms": 0.15159938484430313,
+      "throughput_samples_per_sec": 1688661.205735889,
+      "gflops": 3541.379224931431,
+      "model_memory_mb": 4.00390625,
+      "memory_before_mb": {
+        "allocated_mb": 97.1630859375,
+        "reserved_mb": 104.0,
+        "max_allocated_mb": 97.1630859375
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 97.1630859375,
+        "reserved_mb": 128.0,
+        "max_allocated_mb": 110.16455078125
+      },
+      "memory_after_mb": {
+        "allocated_mb": 13.12890625,
+        "reserved_mb": 128.0,
+        "max_allocated_mb": 110.16455078125
+      }
+    },
+    {
+      "mode": "deploy",
+      "label": "Deploy mode, batch=256",
+      "batch_size": 256,
+      "latency_ms": 0.09587882086634636,
+      "throughput_samples_per_sec": 2670037.00803601,
+      "gflops": 5599.473451476734,
+      "model_memory_mb": 4.003910064697266,
+      "memory_before_mb": {
+        "allocated_mb": 21.1298828125,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 21.1298828125
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 21.1298828125,
+        "reserved_mb": 46.0,
+        "max_allocated_mb": 29.130859375
+      },
+      "memory_after_mb": {
+        "allocated_mb": 21.1298828125,
+        "reserved_mb": 46.0,
+        "max_allocated_mb": 29.130859375
+      }
+    },
+    {
+      "mode": "eval",
+      "label": "Eval mode, batch=512",
+      "batch_size": 512,
+      "latency_ms": 0.16069011762738228,
+      "throughput_samples_per_sec": 3186256.9245686643,
+      "gflops": 6682.065081873024,
+      "model_memory_mb": 4.00390625,
+      "memory_before_mb": {
+        "allocated_mb": 26.1337890625,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 26.1337890625
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 26.1337890625,
+        "reserved_mb": 62.0,
+        "max_allocated_mb": 41.13623046875
+      },
+      "memory_after_mb": {
+        "allocated_mb": 26.1337890625,
+        "reserved_mb": 62.0,
+        "max_allocated_mb": 41.13623046875
+      }
+    },
+    {
+      "mode": "deploy",
+      "label": "Deploy mode, batch=512",
+      "batch_size": 512,
+      "latency_ms": 0.12220107018947601,
+      "throughput_samples_per_sec": 4189816.0073895454,
+      "gflops": 8786.681019529,
+      "model_memory_mb": 4.003910064697266,
+      "memory_before_mb": {
+        "allocated_mb": 34.134765625,
+        "reserved_mb": 42.0,
+        "max_allocated_mb": 34.134765625
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 34.134765625,
+        "reserved_mb": 62.0,
+        "max_allocated_mb": 45.13671875
+      },
+      "memory_after_mb": {
+        "allocated_mb": 34.134765625,
+        "reserved_mb": 62.0,
+        "max_allocated_mb": 45.13671875
+      }
+    },
+    {
+      "mode": "eval",
+      "label": "Eval mode, batch=1024",
+      "batch_size": 1024,
+      "latency_ms": 0.2222892828285694,
+      "throughput_samples_per_sec": 4606609.850775909,
+      "gflops": 9660.761061774398,
+      "model_memory_mb": 4.00390625,
+      "memory_before_mb": {
+        "allocated_mb": 40.138671875,
+        "reserved_mb": 62.0,
+        "max_allocated_mb": 40.138671875
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 40.138671875,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 61.14306640625
+      },
+      "memory_after_mb": {
+        "allocated_mb": 40.138671875,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 61.14306640625
+      }
+    },
+    {
+      "mode": "deploy",
+      "label": "Deploy mode, batch=1024",
+      "batch_size": 1024,
+      "latency_ms": 0.1823047176003456,
+      "throughput_samples_per_sec": 5616969.288994739,
+      "gflops": 11779.638378353895,
+      "model_memory_mb": 4.003910064697266,
+      "memory_before_mb": {
+        "allocated_mb": 48.1396484375,
+        "reserved_mb": 62.0,
+        "max_allocated_mb": 48.1396484375
+      },
+      "memory_after_warmup_mb": {
+        "allocated_mb": 48.1396484375,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 65.1435546875
+      },
+      "memory_after_mb": {
+        "allocated_mb": 48.1396484375,
+        "reserved_mb": 82.0,
+        "max_allocated_mb": 65.1435546875
+      }
+    }
+  ]
+}
