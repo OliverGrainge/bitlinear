@@ -19,13 +19,12 @@ def plot_latency_comparison(all_results: list, output_path: str, labels: list = 
         all_results = [all_results]
         labels = labels or ["Device"]
     
-    # Define color schemes for different devices
-    color_schemes = [
-        {'eval': '#3498db', 'deploy': '#e74c3c'},  # Blue/Red (default)
-        {'eval': '#2ecc71', 'deploy': '#f39c12'},  # Green/Orange
-        {'eval': '#9b59b6', 'deploy': '#e67e22'},  # Purple/Orange
-        {'eval': '#1abc9c', 'deploy': '#e74c3c'},  # Teal/Red
-    ]
+    # Different colors for CPU vs CUDA, same line styles for native vs packed
+    # Native PyTorch: solid line, Packed BitLinear: dashed line (more prominent)
+    device_colors = {
+        'CPU': '#3498db',    # Blue
+        'CUDA': '#e74c3c',   # Red
+    }
     
     markers = ['o', 's', 'D', '^']
     
@@ -34,8 +33,10 @@ def plot_latency_comparison(all_results: list, output_path: str, labels: list = 
     
     # Plot data for each device
     for idx, (results, label) in enumerate(zip(all_results, labels)):
-        colors = color_schemes[idx % len(color_schemes)]
         marker = markers[idx % len(markers)]
+        
+        # Get color for this device (default to first color if not found)
+        device_color = device_colors.get(label, '#3498db')
         
         # Separate eval and deploy results
         eval_results = [r for r in results if r["mode"] == "eval"]
@@ -61,14 +62,15 @@ def plot_latency_comparison(all_results: list, output_path: str, labels: list = 
             batch_sizes, eval_latencies,
             marker=marker, linewidth=2, markersize=6,
             label=f'{label_str} - Native Pytorch',
-            color=colors['eval'], alpha=0.8
+            color=device_color, alpha=0.8,
+            linestyle='-'
         )
         ax1.plot(
             batch_sizes, deploy_latencies,
             marker=marker, linewidth=2, markersize=6,
             label=f'{label_str} - Packed BitLinear',
-            color=colors['deploy'], alpha=0.8,
-            linestyle='--'
+            color=device_color, alpha=0.8,
+            linestyle='--', dashes=(5, 2)
         )
         
         # Plot 2: GFLOP/s vs Batch Size
@@ -76,14 +78,15 @@ def plot_latency_comparison(all_results: list, output_path: str, labels: list = 
             batch_sizes, eval_gflops,
             marker=marker, linewidth=2, markersize=6,
             label=f'{label_str} - Native Pytorch',
-            color=colors['eval'], alpha=0.8
+            color=device_color, alpha=0.8,
+            linestyle='-'
         )
         ax2.plot(
             batch_sizes, deploy_gflops,
             marker=marker, linewidth=2, markersize=6,
             label=f'{label_str} - Packed BitLinear',
-            color=colors['deploy'], alpha=0.8,
-            linestyle='--'
+            color=device_color, alpha=0.8,
+            linestyle='--', dashes=(5, 2)
         )
     
     # Configure Plot 1 (Latency)
@@ -92,6 +95,10 @@ def plot_latency_comparison(all_results: list, output_path: str, labels: list = 
     ax1.set_title('Latency vs Batch Size', fontsize=14, fontweight='bold')
     ax1.set_xscale('log', base=2)
     ax1.set_yscale('log')
+    # Set explicit ticks to show actual batch size values
+    batch_size_ticks = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+    ax1.set_xticks(batch_size_ticks)
+    ax1.set_xticklabels([str(bs) for bs in batch_size_ticks])
     ax1.grid(True, alpha=0.3, linestyle='--')
     ax1.legend(fontsize=10, loc='best')
     
@@ -101,6 +108,9 @@ def plot_latency_comparison(all_results: list, output_path: str, labels: list = 
     ax2.set_title('Compute Throughput vs Batch Size', fontsize=14, fontweight='bold')
     ax2.set_xscale('log', base=2)
     ax2.set_yscale('log')
+    # Set explicit ticks to show actual batch size values
+    ax2.set_xticks(batch_size_ticks)
+    ax2.set_xticklabels([str(bs) for bs in batch_size_ticks])
     ax2.grid(True, alpha=0.3, linestyle='--')
     ax2.legend(fontsize=10, loc='best')
     
@@ -117,13 +127,12 @@ def plot_throughput_comparison(all_results: list, output_path: str, labels: list
         all_results = [all_results]
         labels = labels or ["Device"]
     
-    # Define color schemes for different devices
-    color_schemes = [
-        {'eval': '#3498db', 'deploy': '#e74c3c'},  # Blue/Red (default)
-        {'eval': '#2ecc71', 'deploy': '#f39c12'},  # Green/Orange
-        {'eval': '#9b59b6', 'deploy': '#e67e22'},  # Purple/Orange
-        {'eval': '#1abc9c', 'deploy': '#e74c3c'},  # Teal/Red
-    ]
+    # Different colors for CPU vs CUDA, same line styles for native vs packed
+    # Native PyTorch: solid line, Packed BitLinear: dashed line (more prominent)
+    device_colors = {
+        'CPU': '#3498db',    # Blue
+        'CUDA': '#e74c3c',   # Red
+    }
     
     markers = ['o', 's', 'D', '^']
     
@@ -132,8 +141,10 @@ def plot_throughput_comparison(all_results: list, output_path: str, labels: list
     
     # Plot data for each device
     for idx, (results, label) in enumerate(zip(all_results, labels)):
-        colors = color_schemes[idx % len(color_schemes)]
         marker = markers[idx % len(markers)]
+        
+        # Get color for this device (default to first color if not found)
+        device_color = device_colors.get(label, '#3498db')
         
         # Separate eval and deploy results
         eval_results = [r for r in results if r["mode"] == "eval"]
@@ -148,17 +159,19 @@ def plot_throughput_comparison(all_results: list, output_path: str, labels: list
         
         # Plot 1: Throughput (samples/sec)
         ax1.plot(batch_sizes, eval_throughput, marker=marker, linewidth=2, 
-                 markersize=6, label=f'{label} - Native Pytorch', color=colors['eval'], alpha=0.8)
+                 markersize=6, label=f'{label} - Native Pytorch', color=device_color, alpha=0.8,
+                 linestyle='-')
         ax1.plot(batch_sizes, deploy_throughput, marker=marker, linewidth=2, 
-                 markersize=6, label=f'{label} - Packed BitLinear', color=colors['deploy'], alpha=0.8,
-                 linestyle='--')
+                 markersize=6, label=f'{label} - Packed BitLinear', color=device_color, alpha=0.8,
+                 linestyle='--', dashes=(5, 2))
         
         # Plot 2: GFLOP/s
         ax2.plot(batch_sizes, eval_gflops, marker=marker, linewidth=2, 
-                 markersize=6, label=f'{label} - Native Pytorch', color=colors['eval'], alpha=0.8)
+                 markersize=6, label=f'{label} - Native Pytorch', color=device_color, alpha=0.8,
+                 linestyle='-')
         ax2.plot(batch_sizes, deploy_gflops, marker=marker, linewidth=2, 
-                 markersize=6, label=f'{label} - Packed BitLinear', color=colors['deploy'], alpha=0.8,
-                 linestyle='--')
+                 markersize=6, label=f'{label} - Packed BitLinear', color=device_color, alpha=0.8,
+                 linestyle='--', dashes=(5, 2))
     
     # Configure Plot 1
     ax1.set_xlabel('Batch Size', fontsize=12)
@@ -166,6 +179,10 @@ def plot_throughput_comparison(all_results: list, output_path: str, labels: list
     ax1.set_title('Throughput vs Batch Size', fontsize=14, fontweight='bold')
     ax1.set_xscale('log', base=2)
     ax1.set_yscale('log')
+    # Set explicit ticks to show actual batch size values
+    batch_size_ticks = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+    ax1.set_xticks(batch_size_ticks)
+    ax1.set_xticklabels([str(bs) for bs in batch_size_ticks])
     ax1.grid(True, alpha=0.3, linestyle='--')
     ax1.legend(fontsize=10, loc='best')
     
@@ -175,6 +192,9 @@ def plot_throughput_comparison(all_results: list, output_path: str, labels: list
     ax2.set_title('Compute Performance', fontsize=14, fontweight='bold')
     ax2.set_xscale('log', base=2)
     ax2.set_yscale('log')
+    # Set explicit ticks to show actual batch size values
+    ax2.set_xticks(batch_size_ticks)
+    ax2.set_xticklabels([str(bs) for bs in batch_size_ticks])
     ax2.grid(True, alpha=0.3, linestyle='--')
     ax2.legend(fontsize=10, loc='best')
     
@@ -221,6 +241,10 @@ def plot_memory_comparison(results: list, output_path: str) -> None:
     ax1.set_ylabel('Layer Memory (MB)', fontsize=12)
     ax1.set_title('Static Layer Memory', fontsize=14, fontweight='bold')
     ax1.set_xscale('log', base=2)
+    # Set explicit ticks to show actual batch size values
+    batch_size_ticks = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+    ax1.set_xticks(batch_size_ticks)
+    ax1.set_xticklabels([str(bs) for bs in batch_size_ticks])
     ax1.grid(True, alpha=0.3, linestyle='--')
     ax1.legend(fontsize=11)
     
@@ -241,6 +265,10 @@ def plot_memory_comparison(results: list, output_path: str) -> None:
         ax2.set_ylabel('Runtime Memory (MB)', fontsize=12)
         ax2.set_title('GPU Runtime Memory (Allocated)', fontsize=14, fontweight='bold')
         ax2.set_xscale('log', base=2)
+        # Set explicit ticks to show actual batch size values
+        batch_size_ticks = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+        ax2.set_xticks(batch_size_ticks)
+        ax2.set_xticklabels([str(bs) for bs in batch_size_ticks])
         ax2.grid(True, alpha=0.3, linestyle='--')
         ax2.legend(fontsize=11)
         
@@ -253,6 +281,9 @@ def plot_memory_comparison(results: list, output_path: str) -> None:
         ax3.set_ylabel('Peak Memory (MB)', fontsize=12)
         ax3.set_title('GPU Peak Memory Usage', fontsize=14, fontweight='bold')
         ax3.set_xscale('log', base=2)
+        # Set explicit ticks to show actual batch size values
+        ax3.set_xticks(batch_size_ticks)
+        ax3.set_xticklabels([str(bs) for bs in batch_size_ticks])
         ax3.grid(True, alpha=0.3, linestyle='--')
         ax3.legend(fontsize=11)
         
@@ -397,6 +428,10 @@ def plot_static_memory(all_results: list, output_path: str, labels: list = None)
         
         ax_speedup.axhline(y=1.0, color='gray', linestyle='--', linewidth=1, alpha=0.5)
         ax_speedup.set_xscale('log', base=2)
+        # Set explicit ticks to show actual batch size values
+        batch_size_ticks = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+        ax_speedup.set_xticks(batch_size_ticks)
+        ax_speedup.set_xticklabels([str(bs) for bs in batch_size_ticks])
         ax_speedup.set_xlabel('Batch Size', fontsize=12)
         ax_speedup.set_ylabel('Speedup (Native Pytorch / Packed BitLinear)', fontsize=12)
         ax_speedup.set_title('Latency Speedup vs Batch Size', fontsize=14, fontweight='bold')
